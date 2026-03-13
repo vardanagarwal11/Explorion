@@ -14,6 +14,42 @@
 
 ![Explorion Manim](frontend/public/manim.png)
 
+## Quick Setup
+
+### Prerequisites
+
+- Node.js 18+
+- Python 3.8+
+- Docker & Docker Compose (optional)
+
+### Automated Setup
+
+Run the setup script for your platform:
+
+**Linux/Mac:**
+
+```bash
+./setup.sh
+```
+
+**Windows:**
+
+```cmd
+setup.bat
+```
+
+The script will:
+
+- ✅ Check all prerequisites
+- ✅ Install backend dependencies
+- ✅ Install frontend dependencies
+- ✅ Create environment files
+- ✅ Provide next steps
+
+### Manual Setup
+
+If you prefer manual setup, see [SETUP.md](docs/SETUP.md) for detailed instructions.
+
 ## How It Works
 
 1. **Ingest**: Paste any arXiv paper, GitHub repository, or technical article URL and watch as it's decomposed into digestible sections
@@ -27,6 +63,7 @@
 ## Technical Architecture
 
 Explorion consists of two main parts:
+
 - **Backend (Python)**: Uses FastAPI, `uv` for dependency management, Dedalus SDK for AI orchestration, and Manim for video generation.
 - **Frontend (Node.js)**: A Next.js 15 application utilizing Tailwind CSS and shadcn/ui.
 
@@ -57,19 +94,23 @@ The backend handles AI generation, web scraping, and Manim video rendering.
    cd backend
    ```
 2. Set up environment variables:
+
    ```bash
    cp .env.example .env
    ```
+
    Open the newly created `.env` file and **add your API keys**:
    - `DEDALUS_API_KEY`: Required for the LLM agents to function. Get it from [Dedalus Labs](https://www.dedaluslabs.ai/dashboard/api-keys).
    - `GITHUB_TOKEN`: (Optional but recommended) For scraping GitHub repositories without hitting API rate limits.
    - `TTS_PROVIDER`: Set to `gtts` for free TTS, or configure `openai` / `elevenlabs` if you have keys.
 
 3. Install Python dependencies using `uv`:
+
    ```bash
    uv sync
    ```
-   *(This will automatically create a virtual environment and install all requirements from `uv.lock` / `pyproject.toml`)*
+
+   _(This will automatically create a virtual environment and install all requirements from `uv.lock` / `pyproject.toml`)_
 
 4. Start the FastAPI backend server:
    ```bash
@@ -86,12 +127,15 @@ The frontend provides the interactive scrollytelling interface.
    cd frontend
    ```
 2. Set up frontend environment variables:
+
    ```bash
    cp .env.local.example .env.local  # If the example file exists
    ```
-   *Ensure inside `.env.local` that `NEXT_PUBLIC_API_URL` points to your backend (default is `http://localhost:8000`). If you want to bypass the backend for frontend UI testing, you can set `NEXT_PUBLIC_USE_MOCK=true`.*
+
+   _Ensure inside `.env.local` that `NEXT_PUBLIC_API_URL` points to your backend (default is `http://localhost:8000`). If you want to bypass the backend for frontend UI testing, you can set `NEXT_PUBLIC_USE_MOCK=true`._
 
 3. Install Node dependencies:
+
    ```bash
    npm install
    ```
