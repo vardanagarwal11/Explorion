@@ -59,11 +59,24 @@ goto :eof
 
 REM Check Python version
 :check_python_version
-for /f "tokens=*" %%i in ('python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}') 2^>nul') do set PYTHON_VERSION=%%i
-if "%PYTHON_VERSION%"=="" (
-    REM Try python3
-    for /f "tokens=*" %%i in ('python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}') 2^>nul') do set PYTHON_VERSION=%%i
+if "%PYTHON_CMD%"=="" (
+    REM Try python first, then python3
+    where python >nul 2>nul
+    if %errorlevel%==0 (
+        set PYTHON_CMD=python
+        set PIP_CMD=pip
+    ) else (
+        where python3 >nul 2>nul
+        if %errorlevel%==0 (
+            set PYTHON_CMD=python3
+            set PIP_CMD=pip3
+        ) else (
+            call :error_exit "Python is not accessible. Please ensure Python 3.8+ is installed."
+        )
+    )
 )
+
+for /f "tokens=*" %%i in ('%PYTHON_CMD% -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2^>nul') do set PYTHON_VERSION=%%i
 if "%PYTHON_VERSION%"=="" (
     call :error_exit "Python is not accessible. Please ensure Python 3.8+ is installed."
 )
@@ -90,8 +103,7 @@ call :log_info "Checking prerequisites..."
 
 call :check_command "node"
 call :check_command "npm"
-call :check_command "python"
-call :check_command "pip"
+REM Python check is handled in check_python_version
 call :check_command "docker"
 call :check_command "docker-compose"
 
@@ -118,6 +130,32 @@ if not exist ".env" (
     )
 ) else (
     call :log_info ".env already exists"
+)
+
+REM Create virtual environment if it doesn't exist
+if not exist "venv" (
+    call :log_info "Creating Python virtual environment..."
+    %PYTHON_CMD% -m venv venv
+    if %errorlevel% neq 0 (
+        call :error_exit "Failed to create virtual environment"
+    )
+    call :log_success "Virtual environment created"
+) else (
+    call :log_info "Virtual environment already exists"
+)
+
+REM Activate virtual environment
+call :log_info "Activating virtual environment..."
+call venv\Scripts\activate.bat
+if %errorlevel% neq 0 (
+    call :error_exit "Failed to activate virtual environment"
+)
+
+REM Upgrade pip
+call :log_info "Upgrading pip..."
+pip install --upgrade pip
+if %errorlevel% neq 0 (
+    call :log_warning "Failed to upgrade pip, continuing..."
 )
 
 REM Install Python dependencies
@@ -158,9 +196,10 @@ call :log_success "🎉 Setup complete!"
 echo.
 echo Next steps:
 echo 1. Edit backend\.env with your API keys
-echo 2. Start the backend: cd backend ^& python main.py
-echo 3. Start the frontend: cd frontend ^& npm run dev
-echo 4. Or use Docker: docker-compose up
+echo 2. Activate virtual environment: cd backend ^& venv\Scripts\activate.bat
+echo 3. Start the backend: python main.py
+echo 4. Start the frontend: cd ..\frontend ^& npm run dev
+echo 5. Or use Docker: cd .. ^& docker-compose up
 echo.
 call :log_info "Happy coding! 🚀"
 goto :eof

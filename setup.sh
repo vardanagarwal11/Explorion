@@ -58,7 +58,18 @@ check_node_version() {
 
 # Check Python version
 check_python_version() {
-    local version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+    # Try python3 first, then python
+    if command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+        PIP_CMD="pip3"
+    elif command -v python &> /dev/null; then
+        PYTHON_CMD="python"
+        PIP_CMD="pip"
+    else
+        error_exit "Python is not installed. Please install Python 3.8+ and try again."
+    fi
+
+    local version=$($PYTHON_CMD -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
     local major=$(echo $version | cut -d. -f1)
     local minor=$(echo $version | cut -d. -f2)
     if [ "$major" -lt 3 ] || ([ "$major" -eq 3 ] && [ "$minor" -lt 8 ]); then
@@ -104,9 +115,26 @@ main() {
         log_info ".env already exists"
     fi
 
+    # Create virtual environment if it doesn't exist
+    if [ ! -d "venv" ]; then
+        log_info "Creating Python virtual environment..."
+        $PYTHON_CMD -m venv venv || error_exit "Failed to create virtual environment"
+        log_success "Virtual environment created"
+    else
+        log_info "Virtual environment already exists"
+    fi
+
+    # Activate virtual environment
+    log_info "Activating virtual environment..."
+    source venv/bin/activate || error_exit "Failed to activate virtual environment"
+
+    # Upgrade pip
+    log_info "Upgrading pip..."
+    pip install --upgrade pip || log_warning "Failed to upgrade pip, continuing..."
+
     # Install Python dependencies
     log_info "Installing Python dependencies..."
-    pip3 install -r requirements.txt || error_exit "Failed to install Python dependencies"
+    pip install -r requirements.txt || error_exit "Failed to install Python dependencies"
 
     log_success "Backend setup complete!"
 
@@ -130,9 +158,10 @@ main() {
     echo ""
     echo "Next steps:"
     echo "1. Edit backend/.env with your API keys"
-    echo "2. Start the backend: cd backend && python main.py"
-    echo "3. Start the frontend: cd frontend && npm run dev"
-    echo "4. Or use Docker: docker-compose up"
+    echo "2. Activate virtual environment: cd backend && source venv/bin/activate"
+    echo "3. Start the backend: python main.py"
+    echo "4. Start the frontend: cd ../frontend && npm run dev"
+    echo "5. Or use Docker: cd .. && docker-compose up"
     echo ""
     log_info "Happy coding! 🚀"
 }

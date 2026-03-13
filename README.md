@@ -41,6 +41,7 @@ setup.bat
 The script will:
 
 - ✅ Check all prerequisites
+- ✅ Create Python virtual environment
 - ✅ Install backend dependencies
 - ✅ Install frontend dependencies
 - ✅ Create environment files
