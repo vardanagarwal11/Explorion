@@ -1,208 +1,309 @@
 @echo off
-REM =============================================================
-REM Explorion Project Setup Script (Windows)
-REM =============================================================
-REM This script sets up the full-stack Explorion application
-REM Requirements: Node.js, npm, Python 3.8+, pip, Docker, Docker Compose
-REM =============================================================
+setlocal EnableDelayedExpansion
 
-setlocal enabledelayedexpansion
+:: =============================================================
+:: Explorion Project Setup Script (Windows)
+:: =============================================================
+:: Requirements: Node.js 18+, npm, Python 3.8+, pip, Docker Desktop
+:: Run from the project root (where backend\ and frontend\ exist)
+:: =============================================================
 
-REM Colors for output (Windows CMD)
-REM Note: Windows CMD doesn't support ANSI colors well, using plain text
-set "RED=[ERROR]"
-set "GREEN=[SUCCESS]"
-set "YELLOW=[WARNING]"
-set "BLUE=[INFO]"
+title Explorion Setup
 
-REM Logging functions
-:log_info
-echo %BLUE% %~1
-goto :eof
+echo ========================================
+echo    Setting up Explorion Project
+echo ========================================
+echo.
 
-:log_success
-echo %GREEN% %~1
-goto :eof
-
-:log_warning
-echo %YELLOW% %~1
-goto :eof
-
-:log_error
-echo %RED% %~1
-goto :eof
-
-REM Error handler
-:error_exit
-call :log_error "%~1"
-echo [ERROR] Setup failed. Please check the errors above and try again.
-pause
-exit /b 1
-
-REM Check if command exists
-:check_command
-where "%~1" >nul 2>nul
-if %errorlevel% neq 0 (
-    call :error_exit "%~1 is not installed. Please install %~1 and try again."
+:: -------------------------------------------------------
+:: Check we are in the right directory
+:: -------------------------------------------------------
+if not exist "backend\" (
+    call :log_error "backend\ folder not found."
+    call :log_error "Please run this script from the project root."
+    goto :fail
 )
-goto :eof
-
-REM Check Node.js version
-:check_node_version
-for /f "tokens=*" %%i in ('node -v') do set NODE_VERSION=%%i
-set NODE_VERSION=%NODE_VERSION:v=%
-for /f "tokens=1 delims=." %%a in ("%NODE_VERSION%") do set NODE_MAJOR=%%a
-if %NODE_MAJOR% lss 18 (
-    call :error_exit "Node.js version 18+ is required. Current version: %NODE_VERSION%"
+if not exist "frontend\" (
+    call :log_error "frontend\ folder not found."
+    call :log_error "Please run this script from the project root."
+    goto :fail
 )
-goto :eof
 
-REM Check Python version
-:check_python_version
-if "%PYTHON_CMD%"=="" (
-    REM Try python first, then python3
-    where python >nul 2>nul
-    if %errorlevel%==0 (
-        set PYTHON_CMD=python
-        set PIP_CMD=pip
-    ) else (
-        where python3 >nul 2>nul
-        if %errorlevel%==0 (
-            set PYTHON_CMD=python3
-            set PIP_CMD=pip3
-        ) else (
-            call :error_exit "Python is not accessible. Please ensure Python 3.8+ is installed."
+:: -------------------------------------------------------
+:: Detect Node.js
+:: -------------------------------------------------------
+call :log_info "Checking Node.js..."
+where node >nul 2>&1
+if errorlevel 1 (
+    call :log_error "Node.js is not installed or not on PATH."
+    call :log_error "Download from https://nodejs.org and re-run this script."
+    goto :fail
+)
+
+for /f "tokens=* usebackq" %%v in (`node -v 2^>nul`) do set NODE_VER=%%v
+set NODE_VER=%NODE_VER:v=%
+for /f "tokens=1 delims=." %%m in ("%NODE_VER%") do set NODE_MAJOR=%%m
+if %NODE_MAJOR% LSS 18 (
+    call :log_error "Node.js 18+ required. Current: v%NODE_VER%"
+    call :log_error "Please upgrade Node.js from https://nodejs.org"
+    goto :fail
+)
+call :log_success "Node.js v%NODE_VER% detected."
+
+:: -------------------------------------------------------
+:: Detect npm
+:: -------------------------------------------------------
+where npm >nul 2>&1
+if errorlevel 1 (
+    call :log_error "npm not found. Reinstall Node.js from https://nodejs.org"
+    goto :fail
+)
+for /f "tokens=* usebackq" %%v in (`npm -v 2^>nul`) do set NPM_VER=%%v
+call :log_success "npm %NPM_VER% detected."
+
+:: -------------------------------------------------------
+:: Detect Python 3.8+
+:: -------------------------------------------------------
+call :log_info "Checking Python..."
+set PYTHON_CMD=
+set PIP_CMD=
+
+:: Try each candidate in order
+for %%c in (python3 python py) do (
+    if "!PYTHON_CMD!"=="" (
+        where %%c >nul 2>&1
+        if not errorlevel 1 (
+            :: Verify version
+            for /f "tokens=* usebackq" %%v in (`%%c -c "import sys; print('%%d.%%d' %% sys.version_info[:2])" 2^>nul`) do set PY_VER=%%v
+            if not "!PY_VER!"=="" (
+                for /f "tokens=1 delims=." %%a in ("!PY_VER!") do set PY_MAJOR=%%a
+                for /f "tokens=2 delims=." %%b in ("!PY_VER!") do set PY_MINOR=%%b
+                if !PY_MAJOR! GEQ 3 (
+                    if !PY_MINOR! GEQ 8 (
+                        set PYTHON_CMD=%%c
+                    )
+                )
+            )
         )
     )
 )
 
-for /f "tokens=*" %%i in ('%PYTHON_CMD% -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2^>nul') do set PYTHON_VERSION=%%i
-if "%PYTHON_VERSION%"=="" (
-    call :error_exit "Python is not accessible. Please ensure Python 3.8+ is installed."
+if "!PYTHON_CMD!"=="" (
+    call :log_error "Python 3.8+ not found on PATH."
+    call :log_error "Download from https://www.python.org/downloads/"
+    call :log_error "Make sure to check 'Add Python to PATH' during installation."
+    goto :fail
 )
-for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
-    set PYTHON_MAJOR=%%a
-    set PYTHON_MINOR=%%b
+call :log_success "Python %PY_VER% detected (!PYTHON_CMD!)."
+
+:: Detect pip
+set PIP_CMD=
+for %%p in (pip3 pip) do (
+    if "!PIP_CMD!"=="" (
+        where %%p >nul 2>&1
+        if not errorlevel 1 set PIP_CMD=%%p
+    )
 )
-if %PYTHON_MAJOR% lss 3 (
-    call :error_exit "Python 3.8+ is required. Current version: %PYTHON_VERSION%"
+if "!PIP_CMD!"=="" (
+    !PYTHON_CMD! -m pip --version >nul 2>&1
+    if not errorlevel 1 (
+        set PIP_CMD=!PYTHON_CMD! -m pip
+    ) else (
+        call :log_error "pip not found. Please install pip for !PYTHON_CMD!."
+        goto :fail
+    )
 )
-if %PYTHON_MAJOR%==3 if %PYTHON_MINOR% lss 8 (
-    call :error_exit "Python 3.8+ is required. Current version: %PYTHON_VERSION%"
+call :log_success "pip detected (!PIP_CMD!)."
+
+:: -------------------------------------------------------
+:: Detect Docker (optional)
+:: -------------------------------------------------------
+set DOCKER_AVAILABLE=false
+set COMPOSE_AVAILABLE=false
+
+where docker >nul 2>&1
+if not errorlevel 1 (
+    for /f "tokens=* usebackq" %%v in (`docker --version 2^>nul`) do set DOCKER_VER=%%v
+    call :log_success "Docker detected: !DOCKER_VER!"
+    set DOCKER_AVAILABLE=true
+
+    docker-compose --version >nul 2>&1
+    if not errorlevel 1 (
+        set COMPOSE_AVAILABLE=true
+        call :log_success "Docker Compose (standalone) detected."
+    ) else (
+        docker compose version >nul 2>&1
+        if not errorlevel 1 (
+            set COMPOSE_AVAILABLE=true
+            call :log_success "Docker Compose (plugin) detected."
+        ) else (
+            call :log_warning "Docker Compose not found. Manual start still works."
+        )
+    )
+) else (
+    call :log_warning "Docker not found. You can still run the app manually."
 )
-goto :eof
 
-REM Main setup function
-:main
-echo ========================================
-echo 🚀 Setting up Explorion Project
-echo ========================================
-
-REM Check prerequisites
-call :log_info "Checking prerequisites..."
-
-call :check_command "node"
-call :check_command "npm"
-REM Python check is handled in check_python_version
-call :check_command "docker"
-call :check_command "docker-compose"
-
-call :check_node_version
-call :check_python_version
-
-call :log_success "All prerequisites are installed!"
-
-REM Setup backend
+echo.
+:: -------------------------------------------------------
+:: Backend setup
+:: -------------------------------------------------------
 call :log_info "Setting up backend..."
 cd backend
-if %errorlevel% neq 0 (
-    call :error_exit "Backend directory not found"
-)
 
-REM Check if .env exists
+:: .env
 if not exist ".env" (
     if exist ".env.example" (
         copy ".env.example" ".env" >nul
-        call :log_success "Created .env from .env.example"
-        call :log_warning "Please edit backend\.env with your actual API keys"
+        call :log_success "Created backend\.env from .env.example"
+        call :log_warning "Please edit backend\.env with your actual API keys."
     ) else (
-        call :error_exit ".env.example not found in backend directory"
+        call :log_warning ".env.example not found — skipping .env creation."
     )
 ) else (
-    call :log_info ".env already exists"
+    call :log_info "backend\.env already exists — skipping."
 )
 
-REM Create virtual environment if it doesn't exist
-if not exist "venv" (
+:: Sanity-check existing venv
+if exist "venv\" (
+    venv\Scripts\python.exe -c "import sys" >nul 2>&1
+    if errorlevel 1 (
+        call :log_warning "Existing venv appears broken — removing and recreating..."
+        rmdir /s /q venv
+    ) else (
+        call :log_info "Existing virtual environment found."
+    )
+)
+
+:: Create venv if missing
+if not exist "venv\" (
     call :log_info "Creating Python virtual environment..."
-    %PYTHON_CMD% -m venv venv
-    if %errorlevel% neq 0 (
-        call :error_exit "Failed to create virtual environment"
+    !PYTHON_CMD! -m venv venv
+    if errorlevel 1 (
+        call :log_error "Failed to create virtual environment."
+        call :log_error "Try: !PYTHON_CMD! -m pip install virtualenv"
+        cd ..
+        goto :fail
     )
-    call :log_success "Virtual environment created"
-) else (
-    call :log_info "Virtual environment already exists"
+    call :log_success "Virtual environment created."
 )
 
-REM Activate virtual environment
-call :log_info "Activating virtual environment..."
+:: Activate venv — on Windows we use the Scripts\activate.bat
+if not exist "venv\Scripts\activate.bat" (
+    call :log_error "venv\Scripts\activate.bat not found. The venv may be corrupted."
+    call :log_error "Delete the venv\ folder and re-run this script."
+    cd ..
+    goto :fail
+)
+
 call venv\Scripts\activate.bat
-if %errorlevel% neq 0 (
-    call :error_exit "Failed to activate virtual environment"
+if errorlevel 1 (
+    call :log_error "Failed to activate virtual environment."
+    cd ..
+    goto :fail
 )
+call :log_success "Virtual environment activated."
 
-REM Upgrade pip
-call :log_info "Upgrading pip..."
-pip install --upgrade pip
-if %errorlevel% neq 0 (
-    call :log_warning "Failed to upgrade pip, continuing..."
-)
+:: Upgrade pip inside venv
+call :log_info "Upgrading pip inside venv..."
+python -m pip install --upgrade pip >nul 2>&1
+if errorlevel 1 call :log_warning "pip upgrade failed — continuing."
 
-REM Install Python dependencies
-call :log_info "Installing Python dependencies..."
-pip install -r requirements.txt
-if %errorlevel% neq 0 (
-    call :error_exit "Failed to install Python dependencies"
+:: Install Python deps
+if not exist "requirements.txt" (
+    call :log_warning "requirements.txt not found — skipping dependency install."
+) else (
+    call :log_info "Installing Python dependencies..."
+    python -m pip install -r requirements.txt
+    if errorlevel 1 (
+        call :log_error "Failed to install Python dependencies."
+        call :log_error "Check requirements.txt for errors."
+        cd ..
+        goto :fail
+    )
 )
 
 call :log_success "Backend setup complete!"
+cd ..
 
-REM Setup frontend
-cd ..\frontend
-if %errorlevel% neq 0 (
-    call :error_exit "Frontend directory not found"
-)
+echo.
+:: -------------------------------------------------------
+:: Frontend setup
+:: -------------------------------------------------------
 call :log_info "Setting up frontend..."
+cd frontend
 
-REM Install Node dependencies
 call :log_info "Installing Node.js dependencies..."
 npm install
-if %errorlevel% neq 0 (
-    call :error_exit "Failed to install Node.js dependencies"
+if errorlevel 1 (
+    call :log_error "npm install failed."
+    call :log_error "Try deleting node_modules\ and re-running."
+    cd ..
+    goto :fail
 )
 
 call :log_success "Frontend setup complete!"
-
-REM Return to root
 cd ..
-if %errorlevel% neq 0 (
-    call :error_exit "Could not return to project root"
-)
 
-REM Final instructions
+:: -------------------------------------------------------
+:: Done
+:: -------------------------------------------------------
 echo.
 echo ========================================
-call :log_success "🎉 Setup complete!"
+call :log_success "Setup complete!"
 echo.
 echo Next steps:
-echo 1. Edit backend\.env with your API keys
-echo 2. Activate virtual environment: cd backend ^& venv\Scripts\activate.bat
-echo 3. Start the backend: python main.py
-echo 4. Start the frontend: cd ..\frontend ^& npm run dev
-echo 5. Or use Docker: cd .. ^& docker-compose up
+echo   1. Edit backend\.env with your API keys (if not done already)
 echo.
-call :log_info "Happy coding! 🚀"
+echo   Manual start:
+echo     Terminal 1 (backend):
+echo       cd backend
+echo       venv\Scripts\activate
+echo       python main.py
+echo.
+echo     Terminal 2 (frontend):
+echo       cd frontend
+echo       npm run dev
+echo.
+if "%COMPOSE_AVAILABLE%"=="true" (
+    echo   Docker start:
+    echo       docker-compose up --build
+    echo.
+)
+call :log_info "Happy coding!"
+echo ========================================
+goto :end
+
+:: -------------------------------------------------------
+:: :fail  — clean exit on error
+:: -------------------------------------------------------
+:fail
+echo.
+echo ========================================
+call :log_error "Setup failed. Review the messages above and try again."
+echo ========================================
+endlocal
+exit /b 1
+
+:: -------------------------------------------------------
+:: Logging helpers
+:: -------------------------------------------------------
+:log_info
+echo [INFO] %~1
 goto :eof
 
-REM Run main function
-call :main %*
+:log_success
+echo [SUCCESS] %~1
+goto :eof
+
+:log_warning
+echo [WARNING] %~1
+goto :eof
+
+:log_error
+echo [ERROR] %~1
+goto :eof
+
+:end
+endlocal
+exit /b 0
