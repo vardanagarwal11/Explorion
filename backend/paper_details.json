@@ -1,0 +1,132 @@
+{
+  "paper_id": "gh:upstash/context7",
+  "title": "context7",
+  "authors": [],
+  "abstract": "Context7 MCP Server -- Up-to-date code documentation for LLMs and AI code editors",
+  "pdf_url": "",
+  "html_url": null,
+  "content_type": "github_repo",
+  "source_url": "https://github.com/upstash/context7",
+  "sections": [
+    {
+      "id": "gh-context7-overview",
+      "title": "Project Overview",
+      "content": "# context7\n\nContext7 MCP Server -- Up-to-date code documentation for LLMs and AI code editors\n\n**Project Type:** General\n**Primary Language:** TypeScript\n\n## From README\n\n![Cover](https://github.com/upstash/context7/blob/master/public/cover.png?raw=true)\n\n[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=context7&config=eyJ1cmwiOiJodHRwczovL21jcC5jb250ZXh0Ny5jb20vbWNwIn0%3D)\n\n# Context7 MCP - Up-to-date Code Docs For Any Prompt\n\n[![Website](https://img.shields.io/badge/Website-context7.com-blue)](https://context7.com) [![smithery badge](https://smithery.ai/badge/@upstash/context7-mcp)](https://smithery.ai/server/@upstash/context7-mcp) [![NPM Version](https://img.shields.io/npm/v/%40upstash%2Fcontext7-mcp?color=red)](https://www.npmjs.com/package/@upstash/context7-mcp) [![MIT licensed](https://img.shields.io/npm/l/%40upstash%2Fcontext7-mcp)](./LICENSE)\n\n[![繁體中文](https://img.shields.io/badge/docs-繁體中文-yellow)](./i18n/README.zh-TW.md) [![简体中文](https://img.shields.io/badge/docs-简体中文-yellow)](./i18n/README.zh-CN.md) [![日本語](https://img.shields.io/badge/docs-日本語-b7003a)](./i18n/README.ja.md) [![한국어 문서](https://img.shields.io/badge/docs-한국어-green)](./i18n/README.ko.md) [![Documentación en Español](https://img.shields.io/badge/docs-Español-orange)](./i18n/README.es.md) [![Documentation en Français](https://img.shields.io/badge/docs-Français-blue)](./i18n/README.fr.md) [![Documentação em Português (Brasil)](<https://img.shields.io/badge/docs-Português%20(Brasil)-purple>)](./i18n/README.pt-BR.md) [![Documentazione in italiano](https://img.shields.io/badge/docs-Italian-red)](./i18n/README.it.md) [![Dokumentasi Bahasa Indonesia](https://img.shields.io/badge/docs-Bahasa%20Indonesia-pink)](./i18n/README.id-ID.md) [![Dokumentation auf Deutsch](https://img.shields.io/badge/docs-Deutsch-darkgreen)](./i18n/README.de.md) [![Документация на русском языке](https://img.shields.io/badge/docs-Русский-darkblue)](./i18n/README.ru.md) [![Українська документація](https://img.shields.io/badge/docs-Українська-lightblue)](./i18n/README.uk.md) [![Türkçe Doküman](https://img.shields.io/badge/docs-Türkçe-blue)](./i18n/README.tr.md) [![Arabic Documentation](https://img.shields.io/badge/docs-Arabic-white)](./i18n/README.ar.md) [![Tiếng Việt](https://img.shields.io/badge/docs-Tiếng%20Việt-red)](./i18n/README.vi.md)\n\n## ❌ Without Context7\n\nLLMs rely on outdated or generic information about the libraries you use. You get:\n\n- ❌ Code examples are outdated and based on year-old training data\n- ❌ Hallucinated APIs that don't even exist\n- ❌ Generic answers for old package versions\n\n## ✅ With Context7\n\nContext7 MCP pulls up-to-date, version-specific documentation and code examples straight from the source — and places them directly into your prompt.",
+      "summary": "Context7 MCP Server -- Up-to-date code documentation for LLMs and AI code editors",
+      "level": 1,
+      "order_index": 0,
+      "section_type": null,
+      "equations": [],
+      "code_blocks": [],
+      "video_url": "/api/video/viz_gh:upsta_1"
+    },
+    {
+      "id": "gh-context7-architecture",
+      "title": "Architecture & System Design",
+      "content": "## Detected Architecture\n\n- 📂 `.agents/`\n- 📂 `.changeset/`\n- 📂 `.claude-plugin/`\n- 📚 Documentation (`docs/`)\n- 📂 `i18n/`\n- 📂 `packages/`\n- 🔌 Plugins (`plugins/`)",
+      "summary": "System architecture and component layout of context7",
+      "level": 1,
+      "order_index": 1,
+      "section_type": null,
+      "equations": [],
+      "code_blocks": [],
+      "video_url": "/api/video/viz_gh:upsta_4"
+    },
+    {
+      "id": "gh-context7-structure",
+      "title": "Code Structure & Modules",
+      "content": "## File Tree\n\n```\n📁 upstash/context7/\n  .gitignore\n  LICENSE\n  README.md\n  SECURITY.md\n  eslint.config.js\n  gemini-extension.json\n  package.json\n  pnpm-lock.yaml\n  pnpm-workspace.yaml\n  prettier.config.mjs\n  📂 .agents/\n      ctx7-cli.md\n  📂 .changeset/\n    README.md\n    config.json\n  📂 .claude-plugin/\n    marketplace.json\n  📂 docs/\n    adding-libraries.mdx\n      overview.mdx\n    api-guide.mdx\n      claude-code.mdx\n      cli.mdx\n      cursor.mdx\n      opencode.mdx\n    contact.mdx\n    ... +22 more files\n  📂 i18n/\n    README.ar.md\n    README.de.md\n    README.es.md\n    README.fr.md\n    README.id-ID.md\n    README.it.md\n    README.ja.md\n    README.ko.md\n    ... +7 more files\n  📂 packages/\n      .gitignore\n      CHANGELOG.md\n      README.md\n      eslint.config.js\n      package.json\n      tsconfig.json\n      tsup.config.ts\n      CHANGELOG.md\n    ... +24 more files\n  📂 plugins/\n```\n\n**Total files:** 168\n**Key files loaded:** 40",
+      "summary": "File organization and module structure of context7",
+      "level": 1,
+      "order_index": 2,
+      "section_type": null,
+      "equations": [],
+      "code_blocks": [],
+      "video_url": "/api/video/viz_gh:upsta_5"
+    },
+    {
+      "id": "gh-context7-core",
+      "title": "Core Logic & Key Files",
+      "content": "## Entry Points\n\n### `packages/cli/src/index.ts` (Typescript Entry Point)\n\n```typescript\nimport { Command } from \"commander\";\nimport pc from \"picocolors\";\nimport figlet from \"figlet\";\nimport { registerSkillCommands, registerSkillAliases } from \"./commands/skill.js\";\nimport { registerAuthCommands, setAuthBaseUrl } from \"./commands/auth.js\";\nimport { registerSetupCommand } from \"./commands/setup.js\";\nimport { registerDocsCommands } from \"./commands/docs.js\";\nimport { setBaseUrl } from \"./utils/api.js\";\nimport { VERSION } from \"./constants.js\";\n\nconst brand = {\n  primary: pc.green,\n  dim: pc.dim,\n};\n\nconst program = new Command();\n\nprogram\n  .name(\"ctx7\")\n  .description(\"Context7 CLI - Manage AI coding skills and documentation context\")\n  .version(VERSION)\n  .option(\"--base-url <url>\")\n  .hook(\"preAction\", (thisCommand) => {\n    const opts = thisCommand.opts();\n    if (opts.baseUrl) {\n      setBaseUrl(opts.baseUrl);\n      setAuthBaseUrl(opts.baseUrl);\n    }\n  })\n  .addHelpText(\n```\n\n### `packages/mcp/src/index.ts` (Typescript Entry Point)\n\n```typescript\n#!/usr/bin/env node\n\nimport { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\";\nimport { StdioServerTransport } from \"@modelcontextprotocol/sdk/server/stdio.js\";\nimport { z } from \"zod\";\nimport { searchLibraries, fetchLibraryContext } from \"./lib/api.js\";\nimport { ClientContext } from \"./lib/encryption.js\";\nimport { formatSearchResults, extractClientInfoFromUserAgent } from \"./lib/utils.js\";\nimport { isJWT, validateJWT } from \"./lib/jwt.js\";\nimport express from \"express\";\nimport { StreamableHTTPServerTransport } from \"@modelcontextprotocol/sdk/server/streamableHttp.js\";\nimport { Command } from \"commander\";\nimport { AsyncLocalStorage } from \"async_hooks\";\nimport { SERVER_VERSION, RESOURCE_URL, AUTH_SERVER_URL } from \"./lib/constants.js\";\n\n/** Default HTTP server port */\nconst DEFAULT_PORT = 3000;\n\n// Parse CLI arguments using commander\nconst program = new Command()\n  .option(\"--transport <stdio|http>\", \"transport type\", \"stdio\")\n  .option(\"--port <number>\", \"port for HTTP transport\", DEFAULT_PORT.toString())\n  .option(\"--api-key <key>\", \"API key for authentication (or set CONTEXT7_API_KEY env var)\")\n  .allowUnknownOption() // let MCP Inspector / other wrappers pass through extra flags\n  .parse(process.argv);\n\nconst cliOptions = program.opts<{\n  transport: string;\n  port: string;\n  apiKey?: string;\n```\n\n### `packages/sdk/src/commands/get-context/index.ts` (Typescript Entry Point)\n\n```typescript\nimport { Command } from \"@commands/command\";\nimport type { GetContextOptions, Documentation } from \"@commands/types\";\nimport type { ApiContextJsonResponse } from \"./types\";\nimport type { Requester } from \"@http\";\nimport { Context7Error } from \"@error\";\nimport { formatCodeSnippet, formatInfoSnippet } from \"@utils/format\";\n\nconst DEFAULT_TYPE = \"json\";\n\nexport class GetContextCommand extends Command<Documentation[] | string> {\n  private readonly responseType: \"json\" | \"txt\";\n\n  constructor(query: string, libraryId: string, options?: GetContextOptions) {\n    const queryParams: Record<string, string | number | undefined> = {};\n\n    queryParams.query = query;\n    queryParams.libraryId = libraryId;\n\n    const responseType = options?.type ?? DEFAULT_TYPE;\n    queryParams.type = responseType;\n\n    super({ method: \"GET\", query: queryParams }, \"v2/context\");\n\n    this.responseType = responseType;\n  }\n\n  public override async exec(client: Requester): Promise<Documentation[] | string> {\n    const { result } = await client.request<string | ApiContextJsonResponse>({\n      method: this.request.method || \"GET\",\n      path: [this.endpoint],\n```\n\n### `packages/sdk/src/commands/index.ts` (Typescript Entry Point)\n\n```typescript\nexport * from \"./get-context\";\nexport * from \"./search-library\";\n```\n\n### `packages/sdk/src/commands/search-library/index.ts` (Typescript Entry Point)\n\n```typescript\nimport { Command } from \"@commands/command\";\nimport type { Library, SearchLibraryOptions } from \"@commands/types\";\nimport type { ApiSearchResponse } from \"./types\";\nimport type { Requester } from \"@http\";\nimport { Context7Error } from \"@error\";\nimport { formatLibrary, formatLibrariesAsText } from \"@utils/format\";\n\nconst DEFAULT_TYPE = \"json\";\n\nexport class SearchLibraryCommand extends Command<Library[] | string> {\n  private readonly responseType: \"json\" | \"txt\";\n\n  constructor(query: string, libraryName: string, options?: SearchLibraryOptions) {\n    if (!query || !libraryName) {\n      throw new Context7Error(\"query and libraryName are required\");\n    }\n\n    const queryParams: Record<string, string | number | undefined> = {};\n\n    queryParams.query = query;\n    queryParams.libraryName = libraryName;\n\n    super({ method: \"GET\", query: queryParams }, \"v2/libs/search\");\n\n    this.responseType = options?.type ?? DEFAULT_TYPE;\n  }\n\n  public override async exec(client: Requester): Promise<Library[] | string> {\n    const { result } = await client.request<ApiSearchResponse>({\n      method: this.request.method || \"GET\",\n```\n\n## Other Key Source Files\n\n### `eslint.config.js`\n\n```javascript\nimport tseslint from \"typescript-eslint\";\nimport eslintPluginPrettier from \"eslint-plugin-prettier\";\n\nexport default tseslint.config({\n  // Base ESLint configuration\n  ignores: [\"node_modules/**\", \"build/**\", \"dist/**\", \".git/**\", \".github/**\"],\n  languageOptions: {\n    ecmaVersion: 2020,\n    sourceType: \"module\",\n    parser: tseslint.parser,\n    parserOptions: {},\n    globals: {\n      // Add Node.js globals\n      process: \"readonly\",\n      require: \"readonly\",\n      module: \"writable\",\n      console: \"readonly\",\n    },\n  },\n  // Settings for all files\n  linterOptions: {\n    reportUnusedDisableDirectives: true,\n  },\n  // Apply ESLint recommended rules\n  extends: [tseslint.configs.recommended],\n```",
+      "summary": "Entry points, main logic, and key source files in context7",
+      "level": 1,
+      "order_index": 3,
+      "section_type": null,
+      "equations": [],
+      "code_blocks": [],
+      "video_url": "/api/video/viz_gh:upsta_2"
+    },
+    {
+      "id": "gh-context7-techstack",
+      "title": "Technology Stack & Dependencies",
+      "content": "**Languages:** TypeScript (88%), JavaScript (11%), Dockerfile (0%)\n\n**Node.js Dependencies:** @upstash/context7-sdk, ai, zod, @ai-sdk/amazon-bedrock, @types/node, dotenv, tsup, typescript, vitest\n\n**Stats:** ⭐ 47,947 stars · 🍴 2,263 forks · 📄 MIT\n\n**Topics:** llm, mcp, mcp-server, vibe-coding",
+      "summary": "Languages, frameworks, and dependencies used in context7",
+      "level": 1,
+      "order_index": 4,
+      "section_type": null,
+      "equations": [],
+      "code_blocks": [],
+      "video_url": "/api/video/viz_gh:upsta_3"
+    },
+    {
+      "id": "gh-context7-setup",
+      "title": "Setup & Configuration",
+      "content": "### `Dockerfile`\n\n```yaml\n# ----- Build Stage -----\nFROM node:lts-alpine AS builder\nRUN corepack enable pnpm\nWORKDIR /app\n\n# Copy monorepo config and install dependencies\nCOPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./\nCOPY packages/mcp ./packages/mcp\nRUN pnpm install --frozen-lockfile\n\n# Build the mcp package\nRUN pnpm --filter @upstash/context7-mcp build\n\n# ----- Production Stage -----\nFROM node:lts-alpine\nRUN corepack enable pnpm\nWORKDIR /app\n\n# Install production dependencies only\nCOPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\nCOPY packages/mcp/package.json ./packages/mcp/\nRUN pnpm install --frozen-lockfile --prod --filter @upstash/context7-mcp\n\n# Copy built files from builder\nCOPY --from=builder /app/packages/mcp/dist ./packages/mcp/dist\n\nWORKDIR /app/packages/mcp\nEXPOSE 8080\nCMD [\"node\", \"dist/index.js\", \"--transport\", \"http\", \"--port\", \"8080\"]\n\n```",
+      "summary": "Build, deployment, and configuration files for context7",
+      "level": 1,
+      "order_index": 5,
+      "section_type": null,
+      "equations": [],
+      "code_blocks": [],
+      "video_url": null
+    }
+  ],
+  "visualizations": [
+    {
+      "id": "viz_gh:upsta_1",
+      "section_id": "gh-context7-overview",
+      "concept": "Context7 Problem-Solution Flow",
+      "video_url": "/api/video/viz_gh:upsta_1",
+      "subtitle_url": null,
+      "audio_url": null,
+      "status": "complete"
+    },
+    {
+      "id": "viz_gh:upsta_2",
+      "section_id": "gh-context7-core",
+      "concept": "Context7 System Architecture",
+      "video_url": "/api/video/viz_gh:upsta_2",
+      "subtitle_url": null,
+      "audio_url": null,
+      "status": "complete"
+    },
+    {
+      "id": "viz_gh:upsta_3",
+      "section_id": "gh-context7-techstack",
+      "concept": "MCP Server Architecture for Code Documentation",
+      "video_url": "/api/video/viz_gh:upsta_3",
+      "subtitle_url": null,
+      "audio_url": null,
+      "status": "complete"
+    },
+    {
+      "id": "viz_gh:upsta_4",
+      "section_id": "gh-context7-architecture",
+      "concept": "Context7 MCP Server Architecture",
+      "video_url": "/api/video/viz_gh:upsta_4",
+      "subtitle_url": null,
+      "audio_url": null,
+      "status": "complete"
+    },
+    {
+      "id": "viz_gh:upsta_5",
+      "section_id": "gh-context7-structure",
+      "concept": "Context7 Package Architecture",
+      "video_url": "/api/video/viz_gh:upsta_5",
+      "subtitle_url": null,
+      "audio_url": null,
+      "status": "complete"
+    }
+  ],
+  "processed_at": "2026-03-06T19:40:24.898194"
+}
