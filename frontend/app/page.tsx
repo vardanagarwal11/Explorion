@@ -145,7 +145,7 @@ export default function Home() {
       >
         <div className="container mx-auto px-4 lg:px-8 py-3 lg:py-4 flex items-center justify-between">
           <div className="flex items-center gap-2 lg:gap-4">
-            <Image src="/logo.png" alt="Explorion Logo" width={28} height={28} className="object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
+            <Image src="/logo-new.png" alt="Explorion Logo" width={36} height={36} className="object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
             <div className="font-mono text-white text-xl lg:text-2xl font-bold tracking-widest italic transform -skew-x-12">
               Explorion
             </div>
@@ -237,6 +237,7 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-4 text-[8px] lg:text-[9px] font-mono text-white/50">
+            <a href="/reader" className="hover:text-white transition-colors">DOC_READER_&gt;</a>
             <a href="/dashboard" className="hover:text-white transition-colors">DASHBOARD_&gt;</a>
             <div className="flex items-center gap-2">
               <span className="hidden lg:inline">◐ RENDERING</span>

@@ -6,6 +6,6 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: "*",
       allow: "/",
     },
-    sitemap: "https://arxivisual.org/sitemap.xml",
+    sitemap: "https://exploreion.org/sitemap.xml",
   };
 }
