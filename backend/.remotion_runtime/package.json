@@ -1,0 +1,15 @@
+{
+  "name": "explorion-remotion-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "remotion": "^4.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@types/react": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}

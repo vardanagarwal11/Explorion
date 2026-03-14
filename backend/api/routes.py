@@ -618,31 +618,24 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         else:
             storage_status = "r2: configured"
 
-    # Check Modal configuration
-    from rendering import RENDER_MODE
-    modal_status = "not configured"
-    if RENDER_MODE == "modal":
-        modal_token = os.getenv("MODAL_TOKEN_ID")
-        modal_status = "configured" if modal_token else "missing MODAL_TOKEN_ID"
+    # Rendering mode (always local now)
+    render_status = "local"
 
     # Check GitHub token
     github_status = "configured" if os.getenv("GITHUB_TOKEN") else "unauthenticated (60 req/hr limit)"
 
     # Overall health
-    if RENDER_MODE == "modal":
-        all_healthy = db_status == "connected"
-    else:
-        all_healthy = db_status == "connected" and "available" in manim_status
+    all_healthy = db_status == "connected" and "available" in manim_status
 
     return HealthResponse(
         status="healthy" if all_healthy else "degraded",
         version="0.2.0",
         services={
             "database": db_status,
-            "manim": manim_status if RENDER_MODE != "modal" else f"offloaded to modal ({manim_status})",
+            "manim": manim_status,
             "storage": storage_status,
             "github": github_status,
-            "modal": modal_status,
+            "rendering": render_status,
         }
     )
 

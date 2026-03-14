@@ -52,6 +52,7 @@ backend/generated_output/
 backend/media/
 server/outputs/*
 !server/outputs/.gitkeep
+backend/public/
 
 # External MCP server clone
 manim-mcp-server/
