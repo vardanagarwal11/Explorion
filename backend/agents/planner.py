@@ -20,27 +20,42 @@ logger = logging.getLogger(__name__)
 ENABLE_REMOTION = os.getenv("ENABLE_REMOTION", "true").lower() == "true"
 
 PLANNER_PROMPT = """\
-You are an expert at planning educational animation videos.
+You are an expert storyboard artist for educational animation videos. \
+Your descriptions are so specific that an animator could build the scene \
+without asking any follow-up questions.
 
-Given the following key concepts from a research paper, create a list of animation scenes.
+Given the following concepts, create exactly 3 animation scenes.
 
-Requirements:
-- Create 5 to 7 scenes.
-- Ensure at least one scene uses "manim" and at least one uses "remotion".
-- Keep each scene focused on one concept and make descriptions concrete and visual.
+RULES:
+- Exactly 3 scenes, no more, no less.
+- At least one "manim" scene and at least one "remotion" scene.
+- Use "manim" for: math equations, graphs, algorithms, matrices, geometric proofs, data transformations
+- Use "remotion" for: architecture diagrams, pipelines, system workflows, comparisons, timelines
 
-For each concept decide which engine to use:
-- Use "manim" for: math, equations, graphs, algorithms, matrices, proofs
-- Use "remotion" for: architecture diagrams, pipelines, system workflows, UI flows
+CRITICAL — Your descriptions must be SPECIFIC and VISUAL. Examples:
 
-Return ONLY a JSON object in this exact format — no explanation, no markdown, just the JSON:
+BAD description: "Visualize the attention mechanism"
+GOOD description: "Build a 4x4 grid of colored cells representing token embeddings. \
+Animate spotlight highlights sweeping across rows to show query-key attention. \
+Draw weighted arrows between cells — thicker arrows = higher attention weight. \
+Show the final weighted sum collecting into a single output vector on the right side. \
+Use blue (#4FC3F7) for queries, green (#66BB6A) for keys, orange (#FFA726) for values."
+
+BAD description: "Show the model architecture"
+GOOD description: "Create a vertical stack of 3 glassmorphism cards: 'Encoder', 'Attention', 'Decoder'. \
+Animate data flowing as glowing particles from top card through connecting arrows to bottom card. \
+Each card expands on hover to reveal internal components as smaller sub-cards. \
+Add a progress bar at the bottom filling up as data moves through the pipeline."
+
+Return ONLY a JSON object — no explanation, no markdown:
 
 {{
   "scenes": [
     {{
-      "title": "<short scene title>",
+      "title": "<short scene title, max 5 words>",
       "engine": "<manim or remotion>",
-      "description": "<detailed description of what the animation should show>"
+      "description": "<SPECIFIC visual description: what shapes, colors (#hex), \
+animations, and layout to use. At least 3 sentences. Include color codes.>"
     }}
   ]
 }}
@@ -110,10 +125,10 @@ def run_planner(summary: dict) -> dict:
             "scenes": [
                 {
                     "title": c["name"],
-                    "engine": "manim",
+                    "engine": "manim" if i == 0 else "remotion",
                     "description": c["visualization_opportunity"],
                 }
-                for c in summary.get("main_concepts", [])[:3]
+                for i, c in enumerate(summary.get("main_concepts", [])[:2])
             ]
         }
 

@@ -27,7 +27,7 @@ def nim_generate(
     system: Optional[str] = None,
     model: Optional[str] = None,
     temperature: float = 0.6,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> str:
     """
     Send a chat completion request to the NVIDIA NIM API.

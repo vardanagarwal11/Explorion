@@ -131,7 +131,7 @@ def render_manim(code: str, scene_id: str | None = None) -> str:
             text=True,
             encoding="utf-8",
             errors="ignore",
-            timeout=420,
+            timeout=120,
         )
 
         if result.returncode != 0:
@@ -153,7 +153,7 @@ def render_manim(code: str, scene_id: str | None = None) -> str:
                     text=True,
                     encoding="utf-8",
                     errors="ignore",
-                    timeout=240,
+                    timeout=60,
                 )
                 if fb_result.returncode != 0:
                     raise RuntimeError(

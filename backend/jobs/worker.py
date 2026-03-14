@@ -142,9 +142,12 @@ async def process_paper_job(job_id: str, arxiv_id: str):
             from pipeline.graph import run_pipeline
             logger.info("Invoking visualization generation pipeline...")
             
-            # The new pipeline handles fetching, AI generation, and local rendering synchronously.
+            import functools
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, run_pipeline, arxiv_id)
+            result = await loop.run_in_executor(
+                None,
+                functools.partial(run_pipeline, input_url=arxiv_id),
+            )
             
             scenes = result.get("scenes", [])
             logger.info(f"Generated {len(scenes)} visualization(s)")
@@ -153,12 +156,10 @@ async def process_paper_job(job_id: str, arxiv_id: str):
                 raise RuntimeError("Pipeline finished but generated 0 scenes.")
 
             # Record completed videos in database so the UI can stream them
-            content_id = result.get("paper_id") or arxiv_id
+            content_id = result.get("content_id") or arxiv_id
             
             for i, scene in enumerate(scenes):
-                # graph.py saves the video with this scene_id exactly:
                 viz_id = f"{content_id}_{i}"
-                video_path = scene.get("video_path", "")
                 
                 await queries.upsert_visualization(
                     db,
@@ -169,7 +170,7 @@ async def process_paper_job(job_id: str, arxiv_id: str):
                     storyboard={"description": scene.get("description", "")},
                     manim_code=scene.get("code", ""),
                     status="complete",
-                    video_url=f"/api/video/{viz_id}" # Local API route
+                    video_url=f"/api/video/{viz_id}"
                 )
 
             # Mark job complete
@@ -265,13 +266,25 @@ async def process_universal_job(
             logger.info("Invoking unified visualization pipeline...")
             from pipeline.graph import run_pipeline
             
+            import functools
             loop = asyncio.get_event_loop()
             
-            # If the user passed explicit source_text, we could inject it,
-            # but currently run_pipeline() acts dynamically based on URL.
-            # We pass content_id (which might be an Arxiv ID or URL).
-            input_target = content_id if not source_url else source_url
-            result = await loop.run_in_executor(None, run_pipeline, input_target)
+            # Build the pipeline call based on content type
+            pipeline_kwargs = {}
+            if source_url:
+                pipeline_kwargs["input_url"] = source_url
+            elif source_text:
+                pipeline_kwargs["content"] = source_text
+                pipeline_kwargs["content_id"] = content_id
+                pipeline_kwargs["content_title"] = "Text Content"
+                pipeline_kwargs["input_type"] = "text"
+            else:
+                pipeline_kwargs["input_url"] = content_id
+            
+            result = await loop.run_in_executor(
+                None,
+                functools.partial(run_pipeline, **pipeline_kwargs),
+            )
             
             scenes = result.get("scenes", [])
             logger.info(f"Generated {len(scenes)} visualization(s)")
@@ -280,8 +293,6 @@ async def process_universal_job(
                 raise RuntimeError("Unified pipeline finished but generated 0 scenes.")
 
             # Step 3: Store and map the locally rendered videos
-            content_suffix = content_id.replace(".", "").replace("/", "")[:8]
-            
             for i, scene in enumerate(scenes):
                 viz_id = f"{content_id}_{i}"
                 await queries.upsert_visualization(
@@ -296,22 +307,30 @@ async def process_universal_job(
                     video_url=f"/api/video/{viz_id}"
                 )
 
-            # Mark all generated
+            # Mark job complete
             await queries.update_job_status(
                 db, job_id, 
-                current_step="Render complete", 
-                progress=0.90,
+                status="completed",
+                current_step="Pipeline completed successfully", 
+                progress=1.0,
                 sections_completed=len(scenes),
                 sections_total=len(scenes)
             )
 
-            # Step 4: Generate TTS audio and subtitles (if narration was generated)
+            # Step 4: Generate TTS audio and subtitles (non-blocking, non-fatal)
             if narration_style != "none":
-                await _generate_tts_for_visualizations(
-                    db, content_id, config
-                )
-
-            # Job is now completed (status set before TTS)
+                try:
+                    processing_config = ProcessingConfig(
+                        video_mode=VideoMode(video_mode),
+                        narration_style=NarrationStyle(narration_style),
+                        tts_provider=TTSProvider(tts_provider),
+                        language=language,
+                    )
+                    await _generate_tts_for_visualizations(
+                        db, content_id, processing_config
+                    )
+                except Exception as tts_err:
+                    logger.warning(f"TTS generation failed (non-fatal): {tts_err}")
             
         except Exception as e:
             logger.exception(f"✗ UNIVERSAL JOB FAILED: {job_id}")

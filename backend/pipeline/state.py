@@ -25,12 +25,14 @@ class PipelineState(TypedDict):
     """Complete mutable state for one pipeline run."""
 
     # ── Input ──────────────────────────────────────────────────────────────
-    input_url: str           # arXiv URL / ID supplied by the user
+    input_url: str           # URL / ID supplied by the user (may be empty)
+    input_content: str       # Pre-fetched content text (if already ingested)
+    input_type: str          # "arxiv" | "github" | "pdf" | "text" | ""
 
     # ── Extraction ─────────────────────────────────────────────────────────
-    content: str             # raw title + abstract text
-    paper_id: str            # bare arXiv ID
-    paper_title: str         # human-readable title
+    content: str             # raw text for summarization
+    content_id: str          # unique ID (arXiv ID, gh:owner/repo, hash, etc.)
+    content_title: str       # human-readable title
 
     # ── Summarization ──────────────────────────────────────────────────────
     summary: dict            # {"title": ..., "main_concepts": [...]}

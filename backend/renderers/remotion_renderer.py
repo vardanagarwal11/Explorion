@@ -104,7 +104,7 @@ def _ensure_runtime_project() -> None:
             text=True,
             encoding="utf-8",
             errors="ignore",
-            timeout=600,
+            timeout=120,
         )
         if install.returncode != 0:
             raise RuntimeError(f"Remotion npm install failed: {install.stderr[-800:]}")
@@ -178,9 +178,9 @@ def render_remotion(code: str, scene_id: str | None = None) -> str:
         cwd=RUNTIME_DIR,
         capture_output=True,
         text=True,
-      encoding="utf-8",
-      errors="ignore",
-        timeout=900,
+        encoding="utf-8",
+        errors="ignore",
+        timeout=180,
     )
 
     if render.returncode != 0:
@@ -193,9 +193,9 @@ def render_remotion(code: str, scene_id: str | None = None) -> str:
             cwd=RUNTIME_DIR,
             capture_output=True,
             text=True,
-          encoding="utf-8",
-          errors="ignore",
-            timeout=900,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=180,
         )
         if fallback.returncode != 0:
             raise RuntimeError(
