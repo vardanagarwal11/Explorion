@@ -1,5 +1,5 @@
 """
-Universal content models for arXivisual.
+Universal content models for Explorion.
 
 Supports three input types:
 - Research papers (arXiv, DOI, PDF upload)
