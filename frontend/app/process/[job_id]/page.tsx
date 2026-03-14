@@ -4,7 +4,8 @@ import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, CheckCircle2, ChevronRight, AlertCircle } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = rawApiUrl.startsWith("http") ? rawApiUrl : `http://${rawApiUrl}`;
 
 interface StepInfo {
   name: string;

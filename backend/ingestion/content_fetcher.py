@@ -45,6 +45,9 @@ async def fetch_url_content(url: str) -> tuple[str, str, Optional[str]]:
     Returns:
         Tuple of (title, content_markdown, author)
     """
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
     async with httpx.AsyncClient(
         timeout=30.0,
         follow_redirects=True,

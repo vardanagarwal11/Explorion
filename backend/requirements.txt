@@ -11,6 +11,7 @@ python-dotenv>=0.21.1,<0.22.0
 
 # Cloud AI APIs (Groq + NVIDIA NIM)
 requests>=2.31.0
+langgraph>=0.0.26
 
 # Async / transport
 httpx>=0.25.0
