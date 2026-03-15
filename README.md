@@ -1,18 +1,18 @@
-<div align="center">
-    <img alt="Logo" src="frontend/public/icon.png" width=100 />
-</div>
+<!-- <div align="center">
+    <img alt="Logo" src="frontend/public/logo-new.png" width=100 />
+</div> -->
 <h1 align="center">
   Explorion
 </h1>
 <p align="center">
    Transform research papers, GitHub repositories, and technical content into visual stories
 </p>
+<!-- 
+[![Explorion Video](frontend/public/arXivisual.mp4)](https://github.com/user-attachments/assets/5453760b-5f82-4fd1-9a77-fe8818fea059) -->
 
-[![Explorion Video](frontend/public/arXivisual.mp4)](https://github.com/user-attachments/assets/5453760b-5f82-4fd1-9a77-fe8818fea059)
-
-![Explorion Landing Page](frontend/public/landing.jpeg)
-
-![Explorion Manim](frontend/public/manim.png)
+<!-- ![Explorion Landing Page](frontend/public/landing.jpeg) -->
+<!-- 
+![Explorion Manim](frontend/public/manim.png) -->
 
 ## Quick Setup
 
@@ -159,5 +159,92 @@ The frontend provides the interactive scrollytelling interface.
 
 Research papers and complex technical documentation often arrive as monoliths — dense, opaque, intimidating. Within them lies a mosaic of brilliant ideas waiting to be seen.
 
-<<<<<<< HEAD
 **Explorion** transforms fragments of academic text and technical content into animated visual explanations, making complex research and codebases accessible to everyone.
+
+---
+
+## Features
+
+### Multi-Agent Pipeline Architecture
+
+Explorion uses a sophisticated multi-agent system powered by AI orchestration:
+
+1. **Summarizer Agent**: Extracts 5 key concepts from any source material
+2. **Visualization Planner Agent**: Converts concepts into detailed scene briefs for animation
+3. **Manim Coder Agent**: Generates production-quality Python animation code
+4. **Render Engine**: Converts Manim code to 3Blue1Brown-style MP4 videos
+5. **Spatial Validator**: Ensures all visual elements fit within frame bounds
+6. **Section Analyzer**: Groups visualizations by paper section for scrollytelling
+
+### Supported Content Types
+
+- **arXiv Research Papers** — Full paper parsing with section extraction
+- **GitHub Repositories** — README and code documentation analysis
+- **Technical Blog Posts** — URL-based content ingestion
+- **Raw Text/Markdown** — Custom documentation and articles
+
+### Quality Assurance
+
+Four-stage validation pipeline ensures:
+
+- ✅ Syntactic correctness (valid Manim Python)
+- ✅ Spatial coherence (objects within frame bounds)
+- ✅ Visual consistency (colors, fonts, layout standards)
+- ✅ Runtime stability (successful video rendering)
+
+### Interactive Frontend
+
+- **Scrollytelling Interface**: Read paper sections with embedded videos
+- **Section Navigation**: Jump between concepts with floating dock
+- **Progress Tracking**: See generation status in real-time
+- **Document Library**: Browse all processed content
+
+---
+
+## Project Status & Known Issues
+
+### Current Enhancement in Progress
+
+**Issue**: When processing arXiv papers:
+
+- Only 1 visualization video is generated instead of multiple (one per section)
+- Videos lack explanatory titles/text identifying the concept
+
+**Root Cause**:
+
+- Section filtering threshold too aggressive (40-character minimum explanation)
+- Manim prompt explicitly forbids displaying descriptive text
+
+**Solution**: See [ISSUE_ANALYSIS.md](ISSUE_ANALYSIS.md) for detailed technical breakdown and fix instructions.
+
+---
+
+## Authors
+
+**Created by**: Jatin Tilwani and Vardan Agarwal
+
+---
+
+## License
+
+This project is open source. Please refer to the LICENSE file for details.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please ensure you:
+
+- Follow the existing code style
+- Update tests and documentation
+- Run validation pipelines before submitting PRs
+- Reference any related issues in your PR description
+
+---
+
+## Support & Documentation
+
+- **Architecture Details**: See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Deployment Guide**: See [docs/DEPLOY.md](docs/DEPLOY.md)
+- **Setup Issues**: Check [docs/SETUP.md](docs/SETUP.md)
+- **Issue Analysis**: See [ISSUE_ANALYSIS.md](ISSUE_ANALYSIS.md)
