@@ -1,23 +1,27 @@
 """
-Groq API client for summarization and scene planning.
+API client for summarization and scene planning.
 
-Uses llama-3.3-70b-versatile via the Groq cloud API for fast, structured
+Uses openai/gpt-oss-120b via the NVIDIA cloud API for fast, structured
 text summarization and scene planning tasks.
 """
 
 import logging
 import os
+import sys
 from typing import Optional
 
-import requests
+try:
+    from openai import OpenAI
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1"
 
 def _get_summary_model() -> str:
-    return os.getenv("SUMMARY_MODEL", "llama-3.3-70b-versatile")
+    return os.getenv("SUMMARY_MODEL", "openai/gpt-oss-120b")
 
 # Retry config
 MAX_RETRIES = 3
@@ -27,11 +31,11 @@ def groq_chat(
     prompt: str,
     system: Optional[str] = None,
     model: Optional[str] = None,
-    temperature: float = 0.7,
+    temperature: float = 1.0,
     max_tokens: int = 4096,
 ) -> str:
     """
-    Send a chat completion request to the Groq API.
+    Send a chat completion request using the OpenAI SDK.
 
     Args:
         prompt:      User message content.
@@ -46,9 +50,12 @@ def groq_chat(
     Raises:
         RuntimeError: If the API call fails after retries.
     """
-    if not GROQ_API_KEY:
+    if "openai" not in sys.modules:
+        raise RuntimeError("Please install the 'openai' Python package.")
+
+    if not NVIDIA_API_KEY:
         raise RuntimeError(
-            "GROQ_API_KEY not set. Add it to your .env file."
+            "NVIDIA_API_KEY not set. Add it to your .env file."
         )
 
     model = model or _get_summary_model()
@@ -57,56 +64,52 @@ def groq_chat(
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+    client = OpenAI(
+        base_url=NVIDIA_API_URL,
+        api_key=NVIDIA_API_KEY
+    )
 
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             logger.info(
-                "Groq request | model=%s | attempt=%d | prompt_len=%d",
+                "NVIDIA request | model=%s | attempt=%d | prompt_len=%d",
                 model, attempt, len(prompt),
             )
-            response = requests.post(
-                GROQ_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=TIMEOUT_SECONDS,
+            
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=1,
+                max_tokens=max_tokens,
+                stream=True
             )
-            response.raise_for_status()
 
-            data = response.json()
-            text = data["choices"][0]["message"]["content"]
+            full_text = ""
+            full_reasoning = ""
+
+            for chunk in completion:
+                if not getattr(chunk, "choices", None):
+                    continue
+                
+                reasoning = getattr(chunk.choices[0].delta, "reasoning_content", None)
+                if reasoning:
+                    full_reasoning += reasoning
+                    print(reasoning, end="")
+                
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    print(chunk.choices[0].delta.content, end="")
+                    full_text += chunk.choices[0].delta.content
+
             logger.info(
-                "Groq response | model=%s | response_len=%d",
-                model, len(text),
+                "\nNVIDIA response | model=%s | response_len=%d",
+                model, len(full_text),
             )
-            return text
-
-        except requests.exceptions.HTTPError as exc:
-            last_error = exc
-            status = exc.response.status_code if exc.response else "?"
-            logger.warning(
-                "Groq HTTP error %s on attempt %d: %s",
-                status, attempt, exc,
-            )
-            # Rate limit — wait before retry
-            if exc.response and exc.response.status_code == 429:
-                import time
-                time.sleep(2 * attempt)
-                continue
+            return full_text
 
         except Exception as exc:
             last_error = exc
-            logger.warning("Groq error on attempt %d: %s", attempt, exc)
+            logger.warning("NVIDIA error on attempt %d: %s", attempt, exc)
 
-    raise RuntimeError(f"Groq API failed after {MAX_RETRIES} attempts: {last_error}")
+    raise RuntimeError(f"NVIDIA API failed after {MAX_RETRIES} attempts: {last_error}")
