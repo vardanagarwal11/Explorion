@@ -148,7 +148,7 @@ def _get_headers() -> dict:
     """Build GitHub API request headers."""
     headers = {
         "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "arXivisual/1.0",
+        "User-Agent": "Explorion/1.0",
     }
     token = GITHUB_TOKEN or os.getenv("GITHUB_TOKEN", "")
     if token:

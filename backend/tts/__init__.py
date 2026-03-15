@@ -1,5 +1,5 @@
 """
-Text-to-Speech (TTS) engine abstraction for arXivisual.
+Text-to-Speech (TTS) engine abstraction for Explorion.
 
 Provides a unified interface for multiple TTS providers:
 - gTTS (Google Text-to-Speech): Free, decent quality, multi-language

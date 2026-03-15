@@ -1,5 +1,5 @@
 """
-Background job processing for arXivisual.
+Background job processing for Explorion.
 
 Processes all content types asynchronously with progress tracking.
 Supports legacy paper-only mode and universal content processing.

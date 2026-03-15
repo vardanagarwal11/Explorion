@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  webpack: (config) => {
+    // Required for react-pdf canvas/worker
+    config.resolve.alias.canvas = false;
+    return config;
+  },
 };
 
 export default nextConfig;

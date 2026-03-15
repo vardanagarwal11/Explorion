@@ -51,7 +51,7 @@ async def fetch_url_content(url: str) -> tuple[str, str, Optional[str]]:
     async with httpx.AsyncClient(
         timeout=30.0,
         follow_redirects=True,
-        headers={"User-Agent": "arXivisual/1.0 (content analyzer)"}
+        headers={"User-Agent": "Explorion/1.0 (content analyzer)"}
     ) as client:
         response = await client.get(url)
         response.raise_for_status()

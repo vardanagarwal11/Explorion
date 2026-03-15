@@ -41,6 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from api.routes import router as api_router
+from docreader import router as docreader_router
 from db import init_db
 
 
@@ -77,6 +78,7 @@ app.add_middleware(
 
 # Mount API router
 app.include_router(api_router)
+app.include_router(docreader_router)
 
 
 @app.get("/", include_in_schema=False)

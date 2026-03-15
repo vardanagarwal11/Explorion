@@ -58,3 +58,7 @@ backend/public/
 manim-mcp-server/
 
 backend/bin
+
+# Document Reader data
+backend/docreader/uploads/
+backend/docreader/chroma_store/

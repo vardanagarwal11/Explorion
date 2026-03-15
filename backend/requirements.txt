@@ -30,6 +30,12 @@ lxml>=5.0.0
 # Rendering
 manim>=0.18.0
 
+# Document Reader (AI PDF reader with RAG)
+chromadb>=0.5.5
+pypdf>=5.1.0
+groq>=1.1.1
+python-multipart>=0.0.17
+
 # Tests
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
