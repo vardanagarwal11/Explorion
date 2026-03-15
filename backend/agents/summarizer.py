@@ -42,6 +42,12 @@ Return ONLY a JSON object in this exact format — no explanation, no markdown, 
 
 Limit to the 5 most important concepts.
 
+LENGTH LIMITS (MANDATORY):
+- Keep each `name` to at most 6 words.
+- Keep each `explanation` to at most 16 words.
+- Keep each `visualization_opportunity` to at most 18 words.
+- Use concrete technical wording. Avoid long clauses.
+
 Content:
 {content}
 """
@@ -73,8 +79,8 @@ def run_summarizer(content: str) -> dict:
             "main_concepts": [
                 {
                     "name": "Main Concept",
-                    "explanation": content[:200],
-                    "visualization_opportunity": "Illustrate the key idea",
+              "explanation": "Core idea from the provided content.",
+              "visualization_opportunity": "Show a concise step-by-step mechanism diagram.",
                 }
             ],
         }

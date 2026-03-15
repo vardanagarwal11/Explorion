@@ -412,13 +412,29 @@ async def get_paper(content_id: str, db: AsyncSession = Depends(get_db)):
         section_status_map = {}
         for v in paper.visualizations:
             if v.video_url and v.section_id:
-                existing_status = section_status_map.get(v.section_id)
-                if v.section_id not in section_video_map:
-                    section_video_map[v.section_id] = v.video_url
-                    section_status_map[v.section_id] = v.status
+                # Store the exact section_id
+                vid_sec_id = str(v.section_id)
+                sec_id_keys = [vid_sec_id]
+                if vid_sec_id.startswith("section-"):
+                    sec_id_keys.append(vid_sec_id.replace("section-", "", 1))
+                else:
+                    sec_id_keys.append(f"section-{vid_sec_id}")
+                    
+                # Map 1-based index to the actual section id if it's numeric
+                if vid_sec_id.isdigit():
+                    idx = int(vid_sec_id) - 1
+                    if 0 <= idx < len(sections):
+                        sec_id_keys.append(sections[idx].id)
+                
+                existing_status = section_status_map.get(vid_sec_id)
+                if vid_sec_id not in section_status_map:
+                    for k in sec_id_keys:
+                        section_video_map[k] = v.video_url
+                        section_status_map[k] = v.status
                 elif v.status == "complete" and existing_status != "complete":
-                    section_video_map[v.section_id] = v.video_url
-                    section_status_map[v.section_id] = v.status
+                    for k in sec_id_keys:
+                        section_video_map[k] = v.video_url
+                        section_status_map[k] = v.status
 
         return PaperResponse(
             paper_id=paper.id,

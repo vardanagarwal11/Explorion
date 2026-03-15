@@ -313,6 +313,8 @@ def parse_markdown_to_sections(text: str, title: str = "Technical Content") -> l
     
     matches = list(heading_pattern.finditer(text))
     
+    import uuid
+    
     if matches:
         # Add content before first heading as an intro section
         first_start = matches[0].start()
@@ -320,7 +322,7 @@ def parse_markdown_to_sections(text: str, title: str = "Technical Content") -> l
             intro_text = text[:first_start].strip()
             if intro_text and len(intro_text) > 50:
                 sections.append(Section(
-                    id=f"content-intro",
+                    id=f"content-intro-{uuid.uuid4().hex[:6]}",
                     title="Introduction",
                     level=1,
                     content=intro_text,
@@ -338,7 +340,7 @@ def parse_markdown_to_sections(text: str, title: str = "Technical Content") -> l
             
             if content and len(content) > 30:
                 sections.append(Section(
-                    id=f"content-{i + 1}",
+                    id=f"content-{i + 1}-{uuid.uuid4().hex[:6]}",
                     title=heading,
                     level=level,
                     content=content,
@@ -361,7 +363,7 @@ def parse_markdown_to_sections(text: str, title: str = "Technical Content") -> l
             if current_length >= 500:
                 section_num += 1
                 sections.append(Section(
-                    id=f"content-{section_num}",
+                    id=f"content-{section_num}-{uuid.uuid4().hex[:6]}",
                     title=f"Part {section_num}",
                     level=1,
                     content="\n\n".join(current_content),
@@ -373,7 +375,7 @@ def parse_markdown_to_sections(text: str, title: str = "Technical Content") -> l
         if current_content:
             section_num += 1
             sections.append(Section(
-                id=f"content-{section_num}",
+                id=f"content-{section_num}-{uuid.uuid4().hex[:6]}",
                 title=f"Part {section_num}" if section_num > 1 else title,
                 level=1,
                 content="\n\n".join(current_content),
@@ -457,7 +459,11 @@ async def ingest_technical_content(
     
     # Parse into sections
     sections = parse_markdown_to_sections(text, title or "Technical Content")
-    
+
+    # Force a max limit of 6 sections to prevent 20-37 sections generated
+    from .heuristic_grouper import group_sections_heuristically
+    sections = group_sections_heuristically(sections, max_sections=6)
+
     # Detect content features
     has_code_blocks = bool(re.search(r'```', text))
     has_equations = bool(re.search(r'\$\$.+?\$\$|\\\[.+?\\\]', text, re.DOTALL))

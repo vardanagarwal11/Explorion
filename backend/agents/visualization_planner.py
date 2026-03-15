@@ -41,7 +41,7 @@ class VisualizationPlanner(BaseAgent):
     """
     
     def __init__(self, model: str | None = None):
-        super().__init__("visualization_planner.md", model=model)
+        super().__init__("visualization_planner.md", model=model or "openai/gpt-oss-120b")
     
     async def run(
         self,

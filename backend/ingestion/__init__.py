@@ -127,6 +127,7 @@ async def ingest_content(
     detected_type = content_type or _detect_content_type(url, arxiv_id, text)
     logger.info(f"Ingesting content (type={detected_type.value})")
     
+    result_content = None
     if detected_type == ContentType.RESEARCH_PAPER:
         # Extract arXiv ID from URL if needed
         if not arxiv_id and url:
@@ -135,19 +136,19 @@ async def ingest_content(
             raise ValueError("arXiv ID required for research paper ingestion")
         
         paper = await ingest_paper(arxiv_id, force_refresh=force_refresh)
-        return paper_to_structured_content(paper)
+        result_content = paper_to_structured_content(paper)
     
     elif detected_type == ContentType.GITHUB_REPO:
         if not url:
             raise ValueError("GitHub URL required for repository ingestion")
-        return await ingest_github_repo(
+        result_content = await ingest_github_repo(
             url, 
             branch=kwargs.get("branch"),
             focus_path=kwargs.get("focus_path"),
         )
     
     elif detected_type == ContentType.TECHNICAL_CONTENT:
-        return await ingest_technical_content_wrapper(
+        result_content = await ingest_technical_content_wrapper(
             url=url, 
             text=text,
             title=kwargs.get("title"),
@@ -155,6 +156,14 @@ async def ingest_content(
     
     else:
         raise ValueError(f"Unsupported content type: {detected_type}")
+
+    # GUARANTEE constraint: No matter what method was used, max 6 sections
+    if result_content and len(result_content.sections) > 6:
+        logger.info(f"Generated {len(result_content.sections)} sections. Downscaling to max 6...")
+        from .heuristic_grouper import group_sections_heuristically
+        result_content.sections = group_sections_heuristically(result_content.sections, max_sections=6)
+        
+    return result_content
 
 
 # ═══════════════════════════════════════════════════════════
@@ -231,9 +240,10 @@ async def ingest_paper(
     except Exception as e:
         logger.error(
             f"Section formatting FAILED ({type(e).__name__}: {e}). "
-            f"Falling back to {raw_count} raw sections. "
-            f"This usually means the LLM call timed out or the API key is invalid."
+            f"Falling back to heuristic grouping."
         )
+        from .heuristic_grouper import group_sections_heuristically
+        sections = group_sections_heuristically(sections, max_sections=6)
 
     # Step 5: Build final structure
     paper = StructuredPaper(

@@ -1,4 +1,4 @@
-"""Base agent class with Dedalus-only LLM support."""
+"""Base agent class with Groq/NIM LLM support."""
 
 import asyncio
 import json
@@ -20,60 +20,11 @@ try:
 except ImportError:
     pass  # python-dotenv not installed, use system env vars
 
-
-# Default model
-DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
-
-# Provider is intentionally fixed to Dedalus for production consistency.
-_provider: str = "dedalus"
-
-# Shared Dedalus runner (reuse across agents to avoid re-init)
-_dedalus_runner = None
-
-
-def _detect_provider() -> str:
-    """Detect provider and enforce Dedalus-only configuration."""
-    if not os.environ.get("DEDALUS_API_KEY"):
-        raise RuntimeError(
-            "DEDALUS_API_KEY is required. This project is configured to use "
-            "Dedalus-only LLM routing."
-        )
-    return "dedalus"
-
-
-def get_provider() -> str:
-    """Get the current provider name."""
-    # Always validate env when requested so misconfigurations fail fast.
-    _detect_provider()
-    return _provider
-
-
-def _get_dedalus_runner():
-    """Get or create the shared DedalusRunner instance."""
-    global _dedalus_runner
-    if _dedalus_runner is None:
-        from dedalus_labs import AsyncDedalus, DedalusRunner
-        client = AsyncDedalus(
-            timeout=300.0,  # 5 min — large paper summarization needs headroom
-        )
-        _dedalus_runner = DedalusRunner(client, verbose=False)
-    return _dedalus_runner
-
-
-def _dedalus_model(model: str) -> str:
-    """Convert bare model name to Dedalus format (anthropic/model-name)."""
-    if "/" in model:
-        return model
-    return f"anthropic/{model}"
-
-
-def _get_client() -> None:
-    """Compatibility shim: there is no direct SDK client in Dedalus-only mode."""
-    return None
-
+# Default model falls back to Groq Llama unless overridden by a subclass
+DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 def get_model_name(model: str | None = None) -> str:
-    """Get the model name (bare name, no provider prefix)."""
+    """Get the model name."""
     return model or DEFAULT_MODEL
 
 
@@ -85,67 +36,66 @@ async def call_llm(
     prompt: str,
     model: str = DEFAULT_MODEL,
     system_prompt: str = "",
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> str:
-    """Async LLM call routed through Dedalus."""
-    get_provider()
-    runner = _get_dedalus_runner()
-    dedalus_model = _dedalus_model(model)
-    input_words = len(prompt.split())
-    logger.info(f"[LLM] Calling {dedalus_model} ({input_words} input words, max_tokens={max_tokens})")
-    # Per-call timeout (default 120 s; overridable via env LLM_TIMEOUT_SECONDS)
-    _TIMEOUT = float(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
-    t0 = time.monotonic()
-    try:
-        result = await asyncio.wait_for(
-            runner.run(
-                input=prompt,
-                model=dedalus_model,
-                instructions=system_prompt,
-                max_tokens=max_tokens,
-            ),
-            timeout=_TIMEOUT,
+    """Async LLM call routed through Nim for NVIDIA models, or Groq for anything else."""
+    import asyncio
+    
+    # Use Nim client for specified models (Kimi, meta, openai)
+    lower_model = model.lower()
+    if "moonshotai" in lower_model or "meta/" in lower_model or "kimi" in lower_model or "openai" in lower_model:
+        from providers.nim_client import nim_generate
+        return await asyncio.to_thread(
+            nim_generate,
+            prompt=prompt,
+            system=system_prompt,
+            model=model,
+            temperature=0.7,
+            max_tokens=max_tokens
         )
-        elapsed = time.monotonic() - t0
-        output = result.final_output or ""
-        output_words = len(output.split())
-        logger.info(f"[LLM] {dedalus_model} responded in {elapsed:.1f}s ({output_words} output words)")
-        return output
-    except asyncio.TimeoutError:
-        elapsed = time.monotonic() - t0
-        logger.error(f"[LLM] {dedalus_model} TIMED OUT after {elapsed:.1f}s (limit={_TIMEOUT}s)")
-        raise TimeoutError(f"LLM call timed out after {_TIMEOUT}s — check Dedalus API connectivity")
-    except Exception as e:
-        elapsed = time.monotonic() - t0
-        logger.error(f"[LLM] {dedalus_model} FAILED after {elapsed:.1f}s: {type(e).__name__}: {e}")
-        raise
-
+        
+    from providers.groq_client import groq_chat
+    return await asyncio.to_thread(
+        groq_chat,
+        prompt=prompt,
+        system=system_prompt,
+        model=model,
+        temperature=0.7,
+        max_tokens=max_tokens
+    )
 
 def call_llm_sync(
     prompt: str,
     model: str = DEFAULT_MODEL,
     system_prompt: str = "",
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> str:
-    """Synchronous LLM call routed through Dedalus."""
-    import asyncio
-
-    get_provider()
-    runner = _get_dedalus_runner()
-    result = asyncio.run(runner.run(
-        input=prompt,
-        model=_dedalus_model(model),
-        instructions=system_prompt,
-        max_tokens=max_tokens,
-    ))
-    return result.final_output or ""
+    """Synchronous LLM call routed through Nim or Groq."""
+    
+    lower_model = model.lower()
+    if "moonshotai" in lower_model or "meta/" in lower_model or "kimi" in lower_model or "openai" in lower_model:
+        from providers.nim_client import nim_generate
+        return nim_generate(
+            prompt=prompt,
+            system=system_prompt,
+            model=model,
+            temperature=0.7,
+            max_tokens=max_tokens
+        )
+        
+    from providers.groq_client import groq_chat
+    return groq_chat(
+        prompt=prompt,
+        system=system_prompt,
+        model=model,
+        temperature=0.7,
+        max_tokens=max_tokens
+    )
 
 
 class BaseAgent:
     """
     Base class for all AI agents in the pipeline.
-
-    Uses Dedalus SDK only (DEDALUS_API_KEY).
     """
 
     def __init__(
@@ -154,17 +104,16 @@ class BaseAgent:
         model: str | None = None,
         max_tokens: int = 4096,
     ):
-        self._provider = get_provider()
         self.model = get_model_name(model)
         self.max_tokens = max_tokens
         self.system_prompt = self._load_system_prompt()
         self.prompt_template = self._load_prompt(prompt_file)
 
-        # Keep self.client for any code that still references it directly
-        self.client = _get_client()
-
-        # Log active provider
-        print(f"🔮 Dedalus SDK → anthropic/{self.model}")
+        # Log active provider route
+        if "openai" in self.model.lower() or "kimi" in self.model.lower() or "meta/" in self.model.lower():
+            print(f"🔮 NVIDIA NIM SDK → {self.model}")
+        else:
+            print(f"🔮 Groq SDK → {self.model}")
 
     def _get_prompts_dir(self) -> Path:
         """Get the prompts directory path."""

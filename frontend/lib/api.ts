@@ -95,7 +95,7 @@ export interface HealthResponse {
 function resolveMediaUrl(url: string | undefined | null): string | undefined {
   if (!url) return undefined;
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE}${url}`;
+  return `${API_BASE.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
 }
 
 // === API Functions ===

@@ -99,5 +99,5 @@ if __name__ == "__main__":
         host=host,
         port=port,
         reload=True,
-        reload_excludes=["venv/*", ".remotion_runtime/*", "media/*", "__pycache__/*"],
+        reload_excludes=["venv/*", "media/*", "__pycache__/*"],
     )

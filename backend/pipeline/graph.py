@@ -12,7 +12,7 @@ Graph structure:
    ↓
   generate_codes       — LLM writes animation code for every scene
    ↓
-  render_scenes        — Manim / Remotion renders each scene to MP4
+    render_scenes        — Manim renders each scene to MP4
    ↓
   END
 
@@ -37,7 +37,6 @@ from agents.summarizer import run_summarizer
 from agents.planner import run_planner
 from agents.coder import run_coder
 from renderers.manim_renderer import render_manim
-from renderers.remotion_renderer import render_remotion
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +114,7 @@ def _fetch_github_content(url: str) -> dict:
 
     # Build text content from sections
     text_parts = [structured.meta.title, structured.meta.description or ""]
-    for section in structured.sections[:6]:
+    for section in structured.sections:
         text_parts.append(f"\n## {section.title}\n{section.content[:1500]}")
 
     content_id = structured.meta.content_id
@@ -138,7 +137,7 @@ def _fetch_url_content(url: str) -> dict:
         loop.close()
 
     text_parts = [structured.meta.title]
-    for section in structured.sections[:6]:
+    for section in structured.sections:
         text_parts.append(f"\n## {section.title}\n{section.content[:1500]}")
 
     import hashlib
@@ -197,6 +196,10 @@ def extract_content(state: PipelineState) -> dict:
 
 def summarize(state: PipelineState) -> dict:
     """Run LLM summarizer to extract structured concepts."""
+    if state.get("summary"):
+        logger.info("[Node] summarize | using pre-injected summary")
+        return {}
+    
     logger.info("[Node] summarize | content=%s", state.get("content_title", "?"))
     summary = run_summarizer(state["content"])
     return {"summary": summary}
@@ -249,7 +252,7 @@ def render_scenes(state: PipelineState) -> dict:
             continue
 
         scene_id = f"{state['content_id']}_{i}"
-        engine = scene["engine"]
+        engine = "manim"
         rendered_path = ""
 
         try:
@@ -258,10 +261,7 @@ def render_scenes(state: PipelineState) -> dict:
                 i + 1, len(state["scenes"]), engine, scene.get("title", ""),
             )
 
-            if engine == "remotion":
-                rendered_path = render_remotion(scene["code"], scene_id=scene_id)
-            else:
-                rendered_path = render_manim(scene["code"], scene_id=scene_id)
+            rendered_path = render_manim(scene["code"], scene_id=scene_id)
 
             # Check duration — if too short, log warning but keep it
             duration = _probe_duration_seconds(rendered_path)
@@ -278,6 +278,36 @@ def render_scenes(state: PipelineState) -> dict:
         if rendered_path:
             updated.append({**scene, "video_path": rendered_path})
             logger.info("Rendered scene %d: %s", i, rendered_path)
+            
+            # LIVE UPDATE HACK: Update the DB immediately so the UI streams it progressively
+            try:
+                def _live_update_db():
+                    import asyncio
+                    from db.connection import async_session_maker
+                    from db import queries
+                    async def do_update():
+                        async with async_session_maker() as db:
+                            # Also pull existing TTS if we need, but worker does it at the end.
+                            # Just set status=complete and video_url for the UI.
+                            await queries.upsert_visualization(
+                                db,
+                                viz_id=scene_id,
+                                paper_id=state['content_id'],
+                                section_id=str(i+1),
+                                concept=scene.get("title", ""),
+                                storyboard={"description": scene.get("description", "")},
+                                manim_code=scene.get("code", ""),
+                                status="complete",
+                                video_url=f"/api/video/{scene_id}"
+                            )
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(do_update())
+                    except RuntimeError:
+                        asyncio.run(do_update())
+                _live_update_db()
+            except Exception as e:
+                logger.error(f"Failed live DB update for scene {i}: {e}")
         else:
             updated.append({**scene, "video_path": ""})
 
@@ -326,6 +356,7 @@ def run_pipeline(
     content_id: str = "",
     content_title: str = "",
     input_type: str = "",
+    summary: dict = None,
 ) -> dict:
     """
     Run the full pipeline synchronously.
@@ -351,7 +382,7 @@ def run_pipeline(
         "content": "",
         "content_id": content_id,
         "content_title": content_title,
-        "summary": {},
+        "summary": summary or {},
         "scenes": [],
         "current_scene_index": 0,
         "errors": [],

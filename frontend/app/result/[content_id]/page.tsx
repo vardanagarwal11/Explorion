@@ -62,19 +62,22 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
     const resolveUrl = (url: string | undefined | null): string | undefined => {
         if (!url) return undefined;
         if (url.startsWith("http://") || url.startsWith("https://")) return url;
-        return `${API_URL}${url}`;
+        return `${API_URL.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}`;
     };
 
     useEffect(() => {
-        fetch(`${API_URL}/api/paper/${unwrappedParams.content_id}`)
-            .then(res => {
+        let isActive = true;
+        const fetchData = async () => {
+            try {
+                const res = await fetch(`${API_URL}/api/paper/${unwrappedParams.content_id}`);
                 if (!res.ok) throw new Error("Could not fetch the result data.");
-                return res.json();
-            })
-            .then(json => {
-                // Resolve all media URLs to absolute paths
+                const json = await res.json();
+                
+                if (!isActive) return;
+
                 if (json.sections) {
-                    json.sections = json.sections.map((s: Section) => ({
+                    // Filter out sections named "Abstract" as they are shown in a separate tab
+                    json.sections = json.sections.filter((s: Section) => s.title.toLowerCase() !== "abstract").map((s: Section) => ({
                         ...s,
                         video_url: resolveUrl(s.video_url),
                         subtitle_url: resolveUrl(s.subtitle_url),
@@ -90,12 +93,30 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                     }));
                 }
                 setData(json);
-                if (json.sections && json.sections.length > 0) {
+
+                // Initialize active section only once when loading finishes initially
+                if (loading && json.sections && json.sections.length > 0) {
                     setActiveSectionId(json.sections[0].id);
                 }
-            })
-            .catch(err => setError(err.message))
-            .finally(() => setLoading(false));
+                setLoading(false);
+
+                // If any visualization is incomplete, keep polling
+                const isIncomplete = json.visualizations?.some((v: Visualization) => v.status !== "completed" && v.status !== "failed");
+                const isMissingViz = !json.visualizations || json.visualizations.length < (json.sections?.length || 0);
+
+                if (isIncomplete || isMissingViz) {
+                    setTimeout(fetchData, 5000); // Poll every 5 seconds
+                }
+            } catch (err: any) {
+                if (isActive) {
+                    setError(err.message);
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchData();
+        return () => { isActive = false; };
     }, [unwrappedParams.content_id]);
 
     if (loading) {
@@ -123,9 +144,10 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
     const ContentIcon = contentMeta.icon;
 
     // Resolve video & subtitle URLs
-    const currentVideoUrl = activeSection?.video_url || finalFullVideo?.video_url;
-    const currentSubtitleUrl = activeSection?.subtitle_url || finalFullVideo?.subtitle_url;
-    const currentAudioUrl = activeSection?.audio_url || finalFullVideo?.audio_url;
+    const firstAvailableVideo = data.visualizations?.find(v => v.video_url);
+    const currentVideoUrl = activeSection?.video_url || finalFullVideo?.video_url || firstAvailableVideo?.video_url;
+    const currentSubtitleUrl = activeSection?.subtitle_url || finalFullVideo?.subtitle_url || firstAvailableVideo?.subtitle_url;
+    const currentAudioUrl = activeSection?.audio_url || finalFullVideo?.audio_url || firstAvailableVideo?.audio_url;
 
     return (
         <div className="min-h-screen bg-black text-white/80 font-mono flex flex-col lg:h-screen lg:overflow-hidden">
@@ -186,6 +208,7 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                                 key={currentVideoUrl}
                                 controls
                                 autoPlay
+                                crossOrigin="anonymous"
                                 className="w-full max-h-[70vh] rounded-lg shadow-[0_0_30px_rgba(255,255,255,0.05)] border border-white/10"
                             >
                                 <source src={currentVideoUrl} type="video/mp4" />
@@ -200,9 +223,10 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                                 )}
                             </video>
                         ) : (
-                            <div className="text-center opacity-40">
-                                <PlayCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                                <p className="text-sm">No visualization available for this section.</p>
+                            <div className="text-center opacity-70 flex flex-col items-center">
+                                <Loader2 className="w-12 h-12 mx-auto mb-4 opacity-70 animate-spin text-white" />
+                                <p className="text-sm font-semibold tracking-wide">Visualizing...</p>
+                                <p className="text-xs text-white/50 mt-2 max-w-xs text-center">Your video block is generating in real-time. Please wait.</p>
                             </div>
                         )}
 
@@ -234,22 +258,35 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                                             className={`p-5 cursor-pointer transition-all border-l-2 ${activeSectionId === sec.id ? "bg-white/5 border-white" : "bg-black hover:bg-white/[0.02] border-transparent"}`}
                                         >
                                             <h3 className={`text-sm font-semibold mb-2 ${activeSectionId === sec.id ? "text-white" : "text-white/70"}`}>
-                                                <span className="text-white/30 mr-2 opacity-50">{String((sec.order_index ?? idx) + 1).padStart(2, '0')}</span>
+                                                <span className="text-white/30 mr-2 opacity-50">{String(idx + 1).padStart(2, '0')}</span>
                                                 {sec.title}
                                             </h3>
-                                            <p className="text-xs text-white/50 line-clamp-2 leading-relaxed">
-                                                {sec.summary || sec.content.substring(0, 100) + '...'}
-                                            </p>
+                                            
+                                            {activeSectionId === sec.id ? (
+                                                <div className="text-sm text-white/80 leading-relaxed prose prose-invert prose-sm max-w-none mt-2">
+                                                    <ReactMarkdown>
+                                                        {sec.summary || sec.content || 'No content available.'}
+                                                    </ReactMarkdown>
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-white/50 line-clamp-2 leading-relaxed">
+                                                    {sec.summary || (sec.content && sec.content.length > 100 ? sec.content.substring(0, 100) + '...' : sec.content || 'No content')}
+                                                </p>
+                                            )}
 
-                                            <div className="flex gap-2 mt-3">
-                                                {sec.video_url && (
+                                            <div className="flex gap-2 mt-3 flex-wrap">
+                                                {sec.video_url ? (
                                                     <span className="inline-flex items-center gap-1.5 text-[9px] bg-white/10 px-2 py-0.5 rounded text-white/80 uppercase">
-                                                        <PlayCircle className="w-3 h-3" /> Visualized
+                                                        <PlayCircle className="w-3 h-3 text-green-400" /> Visualized
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1.5 text-[9px] bg-white/5 border border-white/10 px-2 py-0.5 rounded text-white/60 uppercase">
+                                                        <Loader2 className="w-3 h-3 animate-spin" /> Visualizing...
                                                     </span>
                                                 )}
                                                 {sec.audio_url && (
                                                     <span className="inline-flex items-center gap-1.5 text-[9px] bg-white/10 px-2 py-0.5 rounded text-white/80 uppercase">
-                                                        <Volume2 className="w-3 h-3" /> Audio
+                                                        <Volume2 className="w-3 h-3 text-green-400" /> Audio
                                                     </span>
                                                 )}
                                             </div>

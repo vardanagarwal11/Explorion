@@ -137,6 +137,7 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         src={src}
+        crossOrigin="anonymous"
         className="block w-full"
         playsInline
         preload="metadata"

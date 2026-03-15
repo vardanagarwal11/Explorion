@@ -15,7 +15,7 @@ from typing_extensions import TypedDict
 class Scene(TypedDict):
     """A single planned animation scene."""
     title: str
-    engine: str          # "manim" or "remotion"
+    engine: str          # "manim"
     description: str
     code: str            # populated by the coder node
     video_path: str      # populated by the render node

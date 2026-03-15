@@ -440,6 +440,8 @@ def build_structured_content_from_repo(meta: GitHubRepoMeta) -> StructuredConten
     consumes — identical interface to what papers produce.
     """
     sections = analyze_repo_to_sections(meta)
+    from .heuristic_grouper import group_sections_heuristically
+    sections = group_sections_heuristically(sections, max_sections=6)
     
     content_meta = ContentMeta(
         content_type=ContentType.GITHUB_REPO,

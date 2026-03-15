@@ -2,8 +2,8 @@
 Section formatting pipeline for ArXiviz.
 
 Two-phase LLM pipeline:
-  Phase 1: Holistic summarization -- LLM summarizes the entire paper to 30-40%
-           of original length in beginner-friendly language.
+    Phase 1: Holistic summarization -- LLM summarizes the entire paper to ~20%
+                     of original length in beginner-friendly language.
   Phase 2: Section organization -- LLM organizes the summary into <=5 logical
            sections with descriptive headers.
 
@@ -20,6 +20,7 @@ from models.paper import Section, ArxivPaperMeta
 logger = logging.getLogger(__name__)
 
 MAX_SECTIONS = 5
+SECTION_SUMMARY_MAX_WORDS = 40
 
 
 # ---------------------------------------------------------------------------
@@ -104,9 +105,9 @@ async def _summarize_paper(
     """
     Phase 1: Summarize the entire paper holistically.
 
-    Returns plain markdown text at 30-40% of original length.
+    Returns plain markdown text at ~20% of original length.
     """
-    target_pct = 35  # aim for middle of 30-40% range
+    target_pct = 20
     target_words = max(300, int(total_words * target_pct / 100))
 
     system_prompt = (
@@ -310,6 +311,19 @@ def _clean_display_text(text: str) -> str:
     return cleaned
 
 
+def _short_section_summary(text: str, max_words: int = SECTION_SUMMARY_MAX_WORDS) -> str:
+    """Create concise section/module summaries for UI display."""
+    cleaned = _clean_display_text(text or "")
+    if not cleaned:
+        return ""
+
+    first_paragraph = cleaned.split("\n\n", 1)[0].strip()
+    words = first_paragraph.split()
+    if len(words) <= max_words:
+        return first_paragraph
+    return " ".join(words[:max_words]).rstrip(".,;:") + "..."
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -323,7 +337,7 @@ async def format_sections(
     """
     Summarize and organize paper sections for presentation.
 
-    Phase 1: Holistic LLM summarization of the entire paper (30-40% of original).
+    Phase 1: Holistic LLM summarization of the entire paper (~20% of original).
     Phase 2: LLM organizes the summary into <= 5 logical sections.
     Output populates both .content and .summary on each Section.
 
@@ -373,7 +387,7 @@ async def format_sections(
             title=org_section["title"],
             level=1,
             content=cleaned_content,
-            summary=cleaned_content,
+            summary=_short_section_summary(cleaned_content),
             equations=[],
             figures=[],
             tables=[],

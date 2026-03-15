@@ -114,10 +114,11 @@ def extract_sections(
     # Build parent-child hierarchy
     sections = build_hierarchy(sections)
 
+    import uuid
     # Add abstract if not present and available in metadata
     if meta.abstract and not any(s.title.lower() == 'abstract' for s in sections):
         abstract_section = Section(
-            id="abstract",
+            id=f"{meta.arxiv_id}-abstract-{uuid.uuid4().hex[:6]}",
             title="Abstract",
             level=1,
             content=meta.abstract,
@@ -208,24 +209,22 @@ def build_sections_from_headers(
     Build Section objects from found headers.
     """
     sections = []
-    
+    import uuid
+
     for i, header in enumerate(headers):
         # Generate section ID
+        unique_suffix = uuid.uuid4().hex[:6]
         if header.get('number'):
-            section_id = f"section-{header['number'].replace('.', '-')}"
+            section_id = f"section-{header['number'].replace('.', '-')}-{unique_suffix}"
         else:
             # Use sanitized title
             safe_title = re.sub(r'[^a-z0-9]+', '-', header['title'].lower())
             safe_title = safe_title.strip('-')[:30]
-            section_id = f"section-{safe_title or i}"
-        
-        # Extract section content (between this header and next)
-        section_start = header['match_end']
-        section_end = header['end']
-        section_content = text[section_start:section_end].strip()
-        
-        # Clean the content
-        section_content = clean_section_content(section_content)
+            section_id = f"section-{safe_title or i}-{unique_suffix}"
+            
+        section_start = header.get('start', 0)
+        section_end = header.get('end', len(text))
+        section_content = text[section_start:section_end]
         
         # Find equations in this section
         section_equations = find_elements_in_range(

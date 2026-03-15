@@ -138,11 +138,14 @@ def _run_manim_subprocess(
     manim_executable = get_manim_executable()
     tag = f"  [Renderer{label}]"
 
-    # Locate backend/bin where we placed ffmpeg.exe, and build a PATH that
-    # includes it so manim's subprocess calls to 'ffmpeg' succeed.
+    # Locate backend/bin where we placed ffmpeg.exe
     _backend_bin = Path(__file__).parent.parent / "bin"
     _ffmpeg_path = _backend_bin / "ffmpeg.exe"
     _ffmpeg_dir = str(_backend_bin) if _ffmpeg_path.exists() else ""
+
+    # Locate TinyTeX (non-admin install location)
+    _tinytex_bin = Path.home() / "AppData" / "Roaming" / "TinyTeX" / "bin" / "windows"
+    _tinytex_dir = str(_tinytex_bin) if _tinytex_bin.exists() else ""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -179,14 +182,20 @@ def _run_manim_subprocess(
             f"--media_dir={output_dir}",
         ]
 
-        # Build subprocess environment: inject backend/bin at front of PATH
-        # so 'ffmpeg' resolves to our bundled binary.
+        # Build subprocess environment: inject local binaries at front of PATH
         proc_env = os.environ.copy()
+        path_injects = []
         if _ffmpeg_dir:
-            proc_env["PATH"] = _ffmpeg_dir + os.pathsep + proc_env.get("PATH", "")
+            path_injects.append(_ffmpeg_dir)
             logger.info("%s Using ffmpeg from %s", tag, _ffmpeg_dir)
+        if _tinytex_dir:
+            path_injects.append(_tinytex_dir)
+            logger.info("%s Using TinyTeX from %s", tag, _tinytex_dir)
+
+        if path_injects:
+            proc_env["PATH"] = os.pathsep.join(path_injects) + os.pathsep + proc_env.get("PATH", "")
         else:
-            logger.warning("%s backend/bin/ffmpeg.exe not found; using PATH ffmpeg", tag)
+            logger.warning("%s No local binaries found in backend/bin or TinyTeX; using system PATH", tag)
 
         logger.info("%s Starting Manim render: %s (%s)", tag, scene_name, quality)
 
@@ -334,10 +343,8 @@ from manim import *
 
 class TestScene(Scene):
     def construct(self):
-        circle = Circle(color=BLUE)
-        square = Square(color=RED).shift(RIGHT * 2)
-        self.play(Create(circle))
-        self.play(Transform(circle, square))
+        tex = MathTex(r"e^{i\pi} + 1 = 0")
+        self.play(Write(tex))
         self.wait()
 '''
 

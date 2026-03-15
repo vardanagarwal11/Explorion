@@ -1,652 +1,632 @@
-# Explorion Migration Guide
+# Explorion / arXivisual — AI Video Generation Pipeline Architecture
 
-## Converting the Backend from Local Models (Ollama) → NVIDIA NIM + Groq APIs
+## Purpose
 
----
+This document defines the **new architecture and implementation plan** for the Explorion / arXivisual backend pipeline.
 
-# 1. Purpose
+The system converts **technical inputs (research papers, GitHub repositories, PDFs, or technical documentation)** into **AI-generated visual explanation videos** using **Manim and Remotion**.
 
-This document explains how to **convert Explorion from a fully local LLM pipeline to a hybrid cloud pipeline using NVIDIA NIM and Groq APIs**.
-
-The objective is to:
-
-* remove slow local inference
-* use large cloud models for better code generation
-* maintain the existing **LangGraph pipeline**
-* keep the architecture modular
-
-After migration, the system will run:
-
-```
-Extraction (local)
-↓
-Groq API (summarization + scene planning)
-↓
-NVIDIA NIM API (code generation)
-↓
-Local rendering (Manim / Remotion)
-↓
-Video scenes
-```
-
-This hybrid approach ensures:
-
-* fast inference
-* strong coding capability
-* minimal API usage
-* stable animation generation
+The goal is to produce **structured, coherent, non-overlapping visual explanation videos** with a **streaming UI experience**.
 
 ---
 
-# 2. New Architecture
-
-## Previous Architecture (Local)
+# High-Level Pipeline
 
 ```
-Input
-↓
-Extraction
-↓
-Ollama (phi3)
-↓
-Scene planning
-↓
-Ollama (qwen coder)
-↓
-Manim / Remotion
-↓
-Video output
-```
-
-Problems:
-
-* slow inference
-* weaker code generation
-* limited by local GPU
-
----
-
-## New Architecture (Cloud Hybrid)
-
-```
-Input
-↓
-Extraction (Python)
-↓
-Groq API
-(summary + scene planning)
-↓
-NVIDIA NIM API
-(animation code generation)
-↓
-Local Rendering
-Manim / Remotion
-↓
-Video scenes
-```
-
-Benefits:
-
-* large models
-* fast responses
-* improved code accuracy
-
----
-
-# 3. Models Used
-
-## Summarization + Planning
-
-Model:
-
-```
-phi-3.5-mini-instruct
-```
-
-Provider:
-
-```
-Groq API
-```
-
-Purpose:
-
-* summarize papers
-* extract concepts
-* plan animation scenes
-* classify visualization engine
-
-Advantages:
-
-* extremely fast
-* structured output
-* low token usage
-
----
-
-## Code Generation
-
-Model:
-
-```
-llama-3.3-70b-instruct
-```
-
-Provider:
-
-```
-NVIDIA NIM API
-```
-
-Purpose:
-
-* generate Manim animation code
-* generate Remotion React components
-
-Advantages:
-
-* strong reasoning
-* high-quality Python code
-* fewer syntax errors
-
----
-
-# 4. Backend Structure
-
-The backend folder should be organized as follows:
-
-```
-backend/
-
-agents/
-    summarizer.py
-    planner.py
-    coder.py
-
-providers/
-    groq_client.py
-    nim_client.py
-
-extractors/
-    arxiv_extractor.py
-
-renderers/
-    manim_renderer.py
-    remotion_renderer.py
-
-pipeline/
-    graph.py
-    state.py
-
-utils/
-    config.py
+INPUT SOURCE
+(arxiv / github / pdf / research docs)
+        ↓
+CONTENT PARSER
+(clean + normalize text)
+        ↓
+SUMMARIZER
+(Groq)
+        ↓
+SECTION STRUCTURE
+(4–8 sections)
+        ↓
+VIDEO IDEA GENERATOR
+(gpt-oss-120b)
+        ↓
+VIDEO PLAN JSON
+(per section)
+        ↓
+RENDERER SELECTOR
+(Manim vs Remotion)
+        ↓
+CODE GENERATOR
+(Kimi K2 Instruct)
+        ↓
+RENDERING PIPELINE
+(Manim or Remotion)
+        ↓
+VIDEO SEGMENTS
+        ↓
+UI STREAMING + FINAL VIDEO CONCAT
 ```
 
 ---
 
-# 5. Environment Variables
+# Supported Inputs
 
-Create `.env` file.
+The system must support the following input types:
 
-```
-GROQ_API_KEY=your_groq_key
-NIM_API_KEY=your_nim_key
-```
+### Research Papers
 
-Optional configuration:
+* arXiv links
+* DOI links
+* direct PDF upload
+* Google Scholar PDFs
 
-```
-SUMMARY_MODEL=phi-3.5-mini-instruct
-CODE_MODEL=meta/llama-3.3-70b-instruct
-```
+### GitHub Repositories
 
----
+* GitHub repo URL
+* README
+* source code analysis
 
-# 6. Groq API Integration
+### Technical Articles
 
-Create:
-
-```
-backend/providers/groq_client.py
-```
-
-Example implementation:
-
-```python
-import requests
-import os
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-def groq_chat(prompt):
-
-    url = "https://api.groq.com/openai/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": "phi-3.5-mini-instruct",
-        "messages": [
-            {"role":"user","content":prompt}
-        ]
-    }
-
-    response = requests.post(url, headers=headers, json=payload)
-
-    return response.json()["choices"][0]["message"]["content"]
-```
+* blog posts
+* documentation pages
+* tutorials
 
 ---
 
-# 7. NVIDIA NIM API Integration
+# Stage 1 — Content Parser
 
-Create:
+## Purpose
+
+Convert input sources into **clean structured text** for downstream LLM processing.
+
+## Responsibilities
+
+* extract text
+* remove formatting noise
+* normalize structure
+* detect sections
+
+## Output
 
 ```
-backend/providers/nim_client.py
+parsed_content.json
 ```
 
 Example:
 
-```python
-import requests
-import os
-
-NIM_API_KEY = os.getenv("NIM_API_KEY")
-
-def nim_generate(prompt):
-
-    url = "https://integrate.api.nvidia.com/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {NIM_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": "meta/llama-3.3-70b-instruct",
-        "messages":[
-            {"role":"user","content":prompt}
-        ]
-    }
-
-    response = requests.post(url, headers=headers, json=payload)
-
-    return response.json()["choices"][0]["message"]["content"]
-```
-
----
-
-# 8. Summarization Agent
-
-File:
-
-```
-agents/summarizer.py
-```
-
-```python
-from providers.groq_client import groq_chat
-
-def summarize(text):
-
-    prompt = f"""
-Summarize the following research content.
-
-Return JSON:
-
-{{
-"title":"",
-"concepts":[
-{{
-"name":"",
-"explanation":"",
-"visualization_opportunity":""
-}}
-]
-}}
-
-{text}
-"""
-
-    return groq_chat(prompt)
-```
-
----
-
-# 9. Scene Planner
-
-File:
-
-```
-agents/planner.py
-```
-
-Example prompt:
-
-```python
-from providers.groq_client import groq_chat
-
-def plan_scenes(summary):
-
-    prompt = f"""
-Convert this summary into animation scenes.
-
-Return JSON:
-
-{{
-"scenes":[
-{{
-"title":"",
-"engine":"manim or remotion",
-"description":""
-}}
-]
-}}
-
-{summary}
-"""
-
-    return groq_chat(prompt)
-```
-
----
-
-# 10. Code Generation Agent
-
-File:
-
-```
-agents/coder.py
-```
-
-```python
-from providers.nim_client import nim_generate
-
-def generate_animation(scene):
-
-    engine = scene["engine"]
-    description = scene["description"]
-
-    prompt = f"""
-You are an expert animation developer.
-
-Framework: {engine}
-
-Scene description:
-{description}
-
-Rules:
-
-If Manim:
-- write Python code
-- create a Scene class
-- ensure code renders
-
-If Remotion:
-- write React component
-- export a video composition
-
-Return ONLY code.
-"""
-
-    return nim_generate(prompt)
-```
-
----
-
-# 11. Rendering
-
-## Manim
-
-```
-renderers/manim_renderer.py
-```
-
-```python
-import subprocess
-
-def render_manim(file):
-
-    subprocess.run([
-        "manim",
-        "-ql",
-        file,
-        "Scene"
-    ])
-```
-
----
-
-## Remotion
-
-```
-renderers/remotion_renderer.py
-```
-
-```python
-import subprocess
-
-def render_remotion():
-
-    subprocess.run([
-        "npx",
-        "remotion",
-        "render"
-    ])
-```
-
----
-
-# 12. LangGraph Pipeline
-
-Install:
-
-```
-pip install langgraph
-```
-
-Example graph:
-
-```
-extract
-↓
-summarize
-↓
-plan_scenes
-↓
-generate_code
-↓
-render
-```
-
-Graph logic:
-
-```python
-START
-↓
-extract_content
-↓
-summarize
-↓
-plan_scenes
-↓
-scene_loop
-   ↓
- generate_code
-   ↓
- render
-↓
-END
-```
-
----
-
-# 13. Scene Loop
-
-Each scene is processed individually.
-
-Example logic:
-
-```
-for scene in scenes:
-
-    code = generate_animation(scene)
-
-    save code file
-
-    render animation
-
-    store video path
-```
-
-Output example:
-
-```
-scene1.mp4
-scene2.mp4
-scene3.mp4
-```
-
----
-
-# 14. Rate Limit Management
-
-NIM limit:
-
-```
-40 requests per minute
-```
-
-Typical request usage per paper:
-
-```
-1 summarization
-1 planning
-3 code generations
-```
-
-Total:
-
-```
-~5 requests per paper
-```
-
-Safe throughput:
-
-```
-8 papers per minute
-```
-
----
-
-# 15. Error Handling
-
-Add retry mechanism.
-
-Example:
-
-```
-try render
-if error:
-    regenerate code
-    retry
-```
-
-Maximum retries:
-
-```
-3
-```
-
----
-
-# 16. Frontend Integration
-
-Backend should return:
-
-```
+```json
 {
- "title":"Paper Title",
- "scenes":[
-  "video1.mp4",
-  "video2.mp4",
-  "video3.mp4"
+ "title": "Attention is All You Need",
+ "authors": ["Ashish Vaswani"],
+ "sections": [
+   {
+     "title": "Introduction",
+     "content": "..."
+   },
+   {
+     "title": "Model Architecture",
+     "content": "..."
+   }
  ]
 }
 ```
 
-Frontend will display videos in scrollytelling sections.
+## Implementation Suggestions
+
+Python modules:
+
+```
+parser/
+    arxiv_parser.py
+    pdf_parser.py
+    github_parser.py
+```
+
+Recommended libraries:
+
+* `PyMuPDF`
+* `BeautifulSoup`
+* `markdown`
+* `pydantic`
 
 ---
 
-# 17. Expected Performance
+# Stage 2 — Section Summarizer
 
-Approximate pipeline runtime:
+## Model
 
-| Step            | Time      |
-| --------------- | --------- |
-| Extraction      | 1–2 sec   |
-| Summarization   | 1–2 sec   |
-| Scene planning  | 2 sec     |
-| Code generation | 5–10 sec  |
-| Rendering       | 20–60 sec |
-
-Total:
+Use:
 
 ```
-~30–70 seconds per paper
+Groq
 ```
 
-Rendering becomes the main bottleneck.
+## Goal
+
+Convert parsed content into **4–8 core sections** representing the video structure.
+
+## Prompt Objective
+
+The model must:
+
+* identify core ideas
+* merge small sections
+* remove redundant details
+* produce **logical teaching flow**
+
+## Output
+
+```
+sections.json
+```
+
+Example:
+
+```json
+{
+ "sections":[
+  {
+   "id":1,
+   "title":"Introduction",
+   "summary":"Overview of the problem and motivation"
+  },
+  {
+   "id":2,
+   "title":"Transformer Architecture",
+   "summary":"High level explanation of encoder-decoder architecture"
+  },
+  {
+   "id":3,
+   "title":"Attention Mechanism",
+   "summary":"Explanation of Q, K, V and attention scoring"
+  },
+  {
+   "id":4,
+   "title":"Training Process",
+   "summary":"Loss functions and optimization"
+  }
+ ]
+}
+```
 
 ---
 
-# 18. Final Stack
+# Stage 3 — Video Idea Generator
 
-Frontend
+## Model
 
 ```
-Next.js
-Tailwind
-shadcn/ui
+gpt-oss-120b
 ```
 
-Backend
+## Inputs
+
+```
+parsed_content
++
+sections
+```
+
+## Purpose
+
+Generate a **visual explanation plan** for each section.
+
+Each section becomes **one video segment**.
+
+The model should generate:
+
+* scene descriptions
+* animation ideas
+* visual metaphors
+* suggested renderer
+
+## Output
+
+```
+video_plan_section_X.json
+```
+
+Example:
+
+```json
+{
+ "section_title":"Attention Mechanism",
+ "renderer":"manim",
+ "duration":40,
+ "scenes":[
+  {
+   "scene_type":"concept_intro",
+   "visual":"query key value vectors",
+   "animation":"vectors interacting"
+  },
+  {
+   "scene_type":"math_formula",
+   "formula":"softmax(QK^T / sqrt(d_k))V",
+   "animation":"matrix multiplication"
+  },
+  {
+   "scene_type":"visual_explanation",
+   "description":"attention weights highlighting tokens"
+  }
+ ]
+}
+```
+
+---
+
+# Stage 4 — Renderer Selection
+
+Each section must choose a renderer.
+
+## Manim
+
+Use when content includes:
+
+* equations
+* mathematical derivations
+* algorithms
+* graphs
+* vector visualizations
+
+## Remotion
+
+Use when content includes:
+
+* system architecture diagrams
+* UI flows
+* code walkthrough
+* conceptual explanations
+* token flow / pipelines
+
+## Renderer Decision Rule
+
+```
+if contains math:
+    renderer = "manim"
+else:
+    renderer = "remotion"
+```
+
+The LLM suggestion can be overridden by this rule.
+
+---
+
+# Stage 5 — Code Generation
+
+## Model
+
+```
+Kimi K2 Instruct
+```
+
+## Input
+
+```
+video_plan_section.json
+```
+
+## Output
+
+Depending on renderer:
+
+### Manim
+
+```
+manim_scene_section_1.py
+```
+
+### Remotion
+
+```
+remotion_scene_section_1.tsx
+```
+
+## Requirements
+
+Generated code must:
+
+* be deterministic
+* avoid overlapping animations
+* follow scene ordering
+* respect duration limits
+
+---
+
+# Stage 6 — Rendering
+
+## Manim Rendering
+
+Command example:
+
+```
+manim -pqh scene.py SceneName
+```
+
+Output:
+
+```
+scene_1.mp4
+```
+
+---
+
+## Remotion Rendering
+
+Remotion should render React components into video.
+
+Example command:
+
+```
+npx remotion render src/index.tsx Video out/scene_2.mp4
+```
+
+---
+
+# Stage 7 — Video Segments
+
+Each section becomes one video segment.
+
+Example:
+
+```
+scene_1.mp4
+scene_2.mp4
+scene_3.mp4
+scene_4.mp4
+```
+
+---
+
+# Stage 8 — Streaming UI
+
+The UI should display progress as segments render.
+
+Example UI state:
+
+```
+Video Structure
+
+✓ Introduction
+Rendering Architecture
+Queued Attention
+Queued Training
+```
+
+Once a segment finishes rendering:
+
+```
+scene_1.mp4 → playable
+```
+
+Users can begin watching immediately.
+
+---
+
+# Stage 9 — Final Video Concatenation
+
+After all segments render:
+
+```
+ffmpeg concat
+```
+
+Example command:
+
+```
+ffmpeg -f concat -safe 0 -i list.txt -c copy final_video.mp4
+```
+
+---
+
+# Backend Architecture
+
+Suggested backend stack:
 
 ```
 FastAPI
-LangGraph
-Python
+Redis Queue
+Celery Workers
+Docker
 ```
 
-Models
+## Worker Types
+
+### Scene Planning Worker
+
+Handles:
 
 ```
-Groq → phi-3.5-mini
-NVIDIA NIM → llama-3.3-70b
+video idea generation
 ```
 
-Rendering
+### Code Generation Worker
+
+Handles:
 
 ```
-Manim
-Remotion
+Kimi K2 Instruct code generation
+```
+
+### Rendering Worker
+
+Handles:
+
+```
+Manim / Remotion rendering
+```
+
+Rendering workers should be **separate processes**.
+
+---
+
+# File Structure
+
+Suggested backend layout:
+
+```
+backend/
+│
+├── parser/
+│   ├── arxiv_parser.py
+│   ├── pdf_parser.py
+│   └── github_parser.py
+│
+├── summarizer/
+│   └── section_summarizer.py
+│
+├── video_planner/
+│   └── video_idea_generator.py
+│
+├── renderer_selector/
+│   └── renderer_router.py
+│
+├── code_generation/
+│   └── kimi_codegen.py
+│
+├── renderers/
+│   ├── manim_renderer.py
+│   └── remotion_renderer.py
+│
+├── pipeline/
+│   └── pipeline_controller.py
+│
+└── utils/
 ```
 
 ---
 
-# 19. Goal
+# Pipeline Controller Logic
 
-This migration converts Explorion into a **fast hybrid AI visual explanation engine** capable of:
+Pseudo code:
 
-* analyzing research papers
-* generating animation code
-* rendering educational visualizations
+```
+input → parse
 
-using powerful cloud models while keeping rendering fully local.
+parse → summarizer
+
+summarizer → sections
+
+for each section:
+    generate video_plan
+
+for each video_plan:
+    choose renderer
+    generate code
+    render scene
+
+collect scenes
+
+concat video
+```
+
+---
+
+# Key Design Rules
+
+### 1. Maximum Sections
+
+```
+min = 4
+max = 8
+```
+
+---
+
+### 2. Per-Section Rendering
+
+Never generate the entire video at once.
+
+Always:
+
+```
+section → segment
+```
+
+---
+
+### 3. Structured JSON Contracts
+
+Every stage communicates via **JSON contracts**.
+
+Example flow:
+
+```
+parsed_content.json
+sections.json
+video_plan_section.json
+```
+
+---
+
+### 4. Deterministic Rendering
+
+Animations must avoid:
+
+* overlapping objects
+* undefined positions
+* infinite loops
+
+---
+
+# Future Improvements
+
+Potential upgrades:
+
+### Scene Templates
+
+Predefined animation templates:
+
+```
+formula_explanation
+algorithm_flow
+architecture_diagram
+token_flow
+timeline_visualization
+```
+
+---
+
+### Style Generator
+
+Create consistent visual style across segments.
+
+Example:
+
+```
+video_style.json
+```
+
+Example:
+
+```
+color_theme: dark
+font: inter
+transition: fade
+```
+
+---
+
+### Parallel Rendering
+
+Segments can render in parallel using workers.
+
+---
+
+# Summary
+
+The new architecture improves:
+
+* pipeline modularity
+* rendering stability
+* UI responsiveness
+* animation quality
+* scalability
+
+The pipeline converts **technical content into visual explanations** through the following steps:
+
+```
+Input → Parse → Summarize → Video Plan → Code Generation → Rendering → Streaming UI → Final Video
+```
+
+This architecture ensures **consistent, non-overlapping, and structured educational video generation**.
 
 ---

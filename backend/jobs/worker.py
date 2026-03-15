@@ -36,6 +36,14 @@ from models.content import (
 logger = logging.getLogger(__name__)
 
 
+def _truncate_words(text: str, max_words: int) -> str:
+    """Return text trimmed to max_words with stable ellipsis behavior."""
+    words = (text or "").split()
+    if len(words) <= max_words:
+        return (text or "").strip()
+    return " ".join(words[:max_words]).rstrip(".,;:") + "..."
+
+
 class ProgressBar:
     """Simple progress bar for logging output."""
 
@@ -144,11 +152,39 @@ async def process_paper_job(job_id: str, arxiv_id: str):
             
             import functools
             loop = asyncio.get_event_loop()
+            
+            pipeline_kwargs = {"input_url": arxiv_id}
+            # Inject the exact DB sections into the pipeline so planner creates ONE video per section
+            # Assume content_id is the same as arxiv_id for simple papers, or retrieve it
+            # wait, early in process_paper_job it does exist check directly matching arxiv_id?
+            # Actually, _ingest_and_store_paper creates DB entries. Let's just fetch it.
+            db_paper = await queries.get_paper(db, arxiv_id)
+            if db_paper:
+                db_sections = list(db_paper.sections)
+                db_sections.sort(key=lambda s: getattr(s, "order_index", 0) or 0)
+                if db_sections:
+                    pipeline_kwargs["summary"] = {
+                        "title": db_paper.title,
+                        "main_concepts": [{
+                            "name": s.title,
+                            "explanation": _truncate_words(s.summary or s.content or "No content", 24),
+                            "visualization_opportunity": _truncate_words(f"Visualize the core mechanism from {s.title}", 12)
+                        } for s in db_sections]
+                    }
+                    # Pre-insert placeholder visualizations so the UI starts polling
+                    for i, s in enumerate(db_sections):
+                        viz_id = f"{arxiv_id}_{i}"
+                        await queries.upsert_visualization(
+                            db, viz_id=viz_id, paper_id=arxiv_id, section_id=str(i+1),
+                            concept=s.title, storyboard={"description": "Generating visualization..."},
+                            manim_code="", status="pending", video_url=""
+                        )
+
             result = await loop.run_in_executor(
                 None,
-                functools.partial(run_pipeline, input_url=arxiv_id),
+                functools.partial(run_pipeline, **pipeline_kwargs),
             )
-            
+
             scenes = result.get("scenes", [])
             logger.info(f"Generated {len(scenes)} visualization(s)")
 
@@ -280,7 +316,30 @@ async def process_universal_job(
                 pipeline_kwargs["input_type"] = "text"
             else:
                 pipeline_kwargs["input_url"] = content_id
-            
+
+            # Inject the exact DB sections into the pipeline so planner creates ONE video per section
+            db_paper = await queries.get_paper(db, content_id)
+            if db_paper:
+                db_sections = list(db_paper.sections)
+                db_sections.sort(key=lambda s: getattr(s, "order_index", 0) or 0)
+                if db_sections:
+                    pipeline_kwargs["summary"] = {
+                        "title": db_paper.title,
+                        "main_concepts": [{
+                            "name": s.title,
+                            "explanation": _truncate_words(s.summary or s.content or "No content", 24),
+                            "visualization_opportunity": _truncate_words(f"Visualize the core mechanism from {s.title}", 12)
+                        } for s in db_sections]
+                    }
+                    # Pre-insert placeholder visualizations so the UI starts polling
+                    for i, s in enumerate(db_sections):
+                        viz_id = f"{content_id}_{i}"
+                        await queries.upsert_visualization(
+                            db, viz_id=viz_id, paper_id=content_id, section_id=str(i+1),
+                            concept=s.title, storyboard={"description": "Generating visualization..."},
+                            manim_code="", status="pending", video_url=""
+                        )
+
             result = await loop.run_in_executor(
                 None,
                 functools.partial(run_pipeline, **pipeline_kwargs),

@@ -1,36 +1,30 @@
 """
 Scene Planner agent — converts summarized concepts into a list of animated scenes.
 
-Uses Groq API (llama-3.3-70b-versatile) for classification and scene description.
+Uses Groq API (llama-3.3-70b-versatile) for scene planning.
 
 Engine routing:
-  math / equations / graphs / algorithms  →  manim
-  architecture / pipelines / system flows →  remotion
+    all scenes → manim
 """
 
 import logging
-import os
 
 from providers.groq_client import groq_chat
+from providers.nim_client import nim_generate
 from utils.json_parser import extract_json
 
 logger = logging.getLogger(__name__)
-
-# Keep Remotion enabled by default to satisfy mixed-engine output requirements.
-ENABLE_REMOTION = os.getenv("ENABLE_REMOTION", "true").lower() == "true"
 
 PLANNER_PROMPT = """\
 You are an expert storyboard artist for educational animation videos. \
 Your descriptions are so specific that an animator could build the scene \
 without asking any follow-up questions.
 
-Given the following concepts, create exactly 3 animation scenes.
+Given the following concepts, create EXACTLY ONE animation scene for EACH concept provided.
 
 RULES:
-- Exactly 3 scenes, no more, no less.
-- At least one "manim" scene and at least one "remotion" scene.
-- Use "manim" for: math equations, graphs, algorithms, matrices, geometric proofs, data transformations
-- Use "remotion" for: architecture diagrams, pipelines, system workflows, comparisons, timelines
+- You must create exactly as many scenes as there are concepts (e.g. if 5 concepts are provided, create exactly 5 scenes).
+- Use "manim" for every scene.
 
 CRITICAL — Your descriptions must be SPECIFIC and VISUAL. Examples:
 
@@ -53,7 +47,7 @@ Return ONLY a JSON object — no explanation, no markdown:
   "scenes": [
     {{
       "title": "<short scene title, max 5 words>",
-      "engine": "<manim or remotion>",
+            "engine": "manim",
       "description": "<SPECIFIC visual description: what shapes, colors (#hex), \
 animations, and layout to use. At least 3 sentences. Include color codes.>"
     }}
@@ -65,34 +59,10 @@ Concepts:
 """
 
 
-def _rebalance_engines(scenes: list[dict]) -> list[dict]:
-    """Guarantee a mixed-engine plan when Remotion is enabled."""
-    if not scenes or not ENABLE_REMOTION:
-        for s in scenes:
-            s["engine"] = "manim"
-        return scenes
-
-    has_manim = any((s.get("engine") or "").lower() == "manim" for s in scenes)
-    has_remotion = any((s.get("engine") or "").lower() == "remotion" for s in scenes)
-
-    if has_manim and has_remotion:
-        return scenes
-
-    # Promote architecture/pipeline/system scenes to Remotion first.
-    remotion_keywords = ("architecture", "pipeline", "workflow", "system", "component", "framework")
+def _force_manim(scenes: list[dict]) -> list[dict]:
+    """Normalize all planned scenes to Manim-only execution."""
     for s in scenes:
-        text = f"{s.get('title', '')} {s.get('description', '')}".lower()
-        if any(k in text for k in remotion_keywords):
-            s["engine"] = "remotion"
-            has_remotion = True
-            break
-
-    # If still no remotion and we have at least 2 scenes, force one scene to remotion.
-    if not has_remotion and len(scenes) >= 2:
-        scenes[1]["engine"] = "remotion"
-
-    # Keep first scene as Manim for mathematical grounding.
-    scenes[0]["engine"] = "manim"
+        s["engine"] = "manim"
     return scenes
 
 
@@ -114,7 +84,14 @@ def run_planner(summary: dict) -> dict:
     prompt = PLANNER_PROMPT.format(concepts=concepts_text)
 
     logger.info("Running planner for %d concepts", len(summary.get("main_concepts", [])))
-    raw = groq_chat(prompt)
+    
+    # Try using NIM with OpenAI OSS 120b first
+    try:
+        raw = nim_generate(prompt=prompt, model="openai/gpt-oss-120b", temperature=0.7)
+    except Exception as e:
+        logger.warning(f"OpenAI OSS 120b failed, falling back to Groq: {e}")
+        raw = groq_chat(prompt)
+        
     logger.debug("Planner raw response: %s", raw[:500])
 
     try:
@@ -125,7 +102,7 @@ def run_planner(summary: dict) -> dict:
             "scenes": [
                 {
                     "title": c["name"],
-                    "engine": "manim" if i == 0 else "remotion",
+                    "engine": "manim",
                     "description": c["visualization_opportunity"],
                 }
                 for i, c in enumerate(summary.get("main_concepts", [])[:2])
@@ -134,11 +111,10 @@ def run_planner(summary: dict) -> dict:
 
     # Ensure engine values are normalised
     for scene in result.get("scenes", []):
-        if scene.get("engine", "").lower() not in ("manim", "remotion"):
-            scene["engine"] = "manim"
+        scene["engine"] = "manim"
 
     scenes = result.get("scenes", [])
-    scenes = _rebalance_engines(scenes)
+    scenes = _force_manim(scenes)
     result["scenes"] = scenes
 
     return result
