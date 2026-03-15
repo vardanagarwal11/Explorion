@@ -1,5 +1,5 @@
 """
-Background job processing for arXivisual.
+Background job processing for Explorion.
 
 Processes all content types asynchronously with progress tracking.
 Supports legacy paper-only mode and universal content processing.
@@ -13,7 +13,8 @@ from db.connection import async_session_maker
 from db import queries
 from db.models import Section
 from rendering import process_visualization, get_video_path
-from agents.pipeline import generate_visualizations, generate_universal_visualizations
+# NOTE: agents.pipeline is imported lazily inside functions that use it
+# to avoid pulling in heavy/optional dependencies at startup.
 from models.paper import (
     ArxivPaperMeta,
     Equation,
@@ -127,33 +128,59 @@ async def process_paper_job(job_id: str, arxiv_id: str):
                     progress=0.30
                 )
 
-            # Step 2: Generate visualizations from structured paper
+            # Step 2: Use the unified graph pipeline for end-to-end processing
             logger.info("=" * 60)
-            logger.info("STEP 2: Generating visualizations from structured paper")
+            logger.info("STEP 2: Generating and Rendering with pipeline.graph")
             logger.info("=" * 60)
 
             await queries.update_job_status(
                 db, job_id,
-                current_step="Analyzing concepts for visualization",
-                progress=0.50
+                current_step="Running unified pipeline (summarization, planning, coding, rendering)...",
+                progress=0.40
             )
 
-            db_paper = await queries.get_paper(db, arxiv_id)
-            logger.info(f"Found paper in database: {db_paper.title}")
-
-            db_sections = sorted(db_paper.sections, key=lambda s: s.order_index)
-            logger.info(f"Loaded {len(db_sections)} sections from database")
-
-            structured_paper = _build_structured_paper_from_db(db_paper, db_sections)
-            logger.info("Converted database sections to StructuredPaper format")
-
+            from pipeline.graph import run_pipeline
             logger.info("Invoking visualization generation pipeline...")
-            generated_visualizations = await generate_visualizations(structured_paper)
-            logger.info(f"Generated {len(generated_visualizations)} visualization(s)")
+            
+            import functools
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                functools.partial(run_pipeline, input_url=arxiv_id),
+            )
+            
+            scenes = result.get("scenes", [])
+            logger.info(f"Generated {len(scenes)} visualization(s)")
 
-            # Render
-            await _store_and_render_visualizations(
-                db, job_id, arxiv_id, generated_visualizations
+            if not scenes:
+                raise RuntimeError("Pipeline finished but generated 0 scenes.")
+
+            # Record completed videos in database so the UI can stream them
+            content_id = result.get("content_id") or arxiv_id
+            
+            for i, scene in enumerate(scenes):
+                viz_id = f"{content_id}_{i}"
+                
+                await queries.upsert_visualization(
+                    db,
+                    viz_id=viz_id,
+                    paper_id=content_id,
+                    section_id=str(i+1),
+                    concept=scene.get("title", ""),
+                    storyboard={"description": scene.get("description", "")},
+                    manim_code=scene.get("code", ""),
+                    status="complete",
+                    video_url=f"/api/video/{viz_id}"
+                )
+
+            # Mark job complete
+            await queries.update_job_status(
+                db, job_id, 
+                status="completed", 
+                current_step="Pipeline completed successfully", 
+                progress=1.0,
+                sections_completed=len(scenes),
+                sections_total=len(scenes)
             )
 
         except Exception as e:
@@ -235,53 +262,76 @@ async def process_universal_job(
             logger.info("STEP 2: Generating visualizations")
             logger.info("=" * 60)
 
-            await queries.update_job_status(
-                db, job_id,
-                current_step="Analyzing concepts for visualization",
-                progress=0.50,
-            )
-
-            db_paper = await queries.get_paper(db, content_id)
-            if not db_paper:
-                raise RuntimeError(f"Content {content_id} not found in database after ingestion")
-
-            logger.info(f"Found content in database: {db_paper.title}")
-
-            db_sections = sorted(db_paper.sections, key=lambda s: s.order_index)
-            logger.info(f"Loaded {len(db_sections)} sections from database")
-
-            # Build ProcessingConfig from job params
-            config = ProcessingConfig(
-                video_mode=VideoMode(video_mode),
-                narration_style=NarrationStyle(narration_style),
-                tts_provider=TTSProvider(tts_provider),
-                language=language,
-            )
-
-            # Build StructuredContent from DB
-            structured_content = _build_structured_content_from_db(
-                db_paper, db_sections, content_type
-            )
-            logger.info("Converted database records to StructuredContent format")
-
             # Generate using universal pipeline
-            logger.info("Invoking universal visualization pipeline...")
-            generated_visualizations = await generate_universal_visualizations(
-                structured_content, config
+            logger.info("Invoking unified visualization pipeline...")
+            from pipeline.graph import run_pipeline
+            
+            import functools
+            loop = asyncio.get_event_loop()
+            
+            # Build the pipeline call based on content type
+            pipeline_kwargs = {}
+            if source_url:
+                pipeline_kwargs["input_url"] = source_url
+            elif source_text:
+                pipeline_kwargs["content"] = source_text
+                pipeline_kwargs["content_id"] = content_id
+                pipeline_kwargs["content_title"] = "Text Content"
+                pipeline_kwargs["input_type"] = "text"
+            else:
+                pipeline_kwargs["input_url"] = content_id
+            
+            result = await loop.run_in_executor(
+                None,
+                functools.partial(run_pipeline, **pipeline_kwargs),
             )
-            logger.info(f"Generated {len(generated_visualizations)} visualization(s)")
+            
+            scenes = result.get("scenes", [])
+            logger.info(f"Generated {len(scenes)} visualization(s)")
 
-            # Step 3: Store, render, and optionally generate TTS
-            await _store_and_render_visualizations(
-                db, job_id, content_id, generated_visualizations
-            )
+            if not scenes:
+                raise RuntimeError("Unified pipeline finished but generated 0 scenes.")
 
-            # Step 4: Generate TTS audio and subtitles (if narration was generated)
-            if narration_style != "none":
-                await _generate_tts_for_visualizations(
-                    db, content_id, config
+            # Step 3: Store and map the locally rendered videos
+            for i, scene in enumerate(scenes):
+                viz_id = f"{content_id}_{i}"
+                await queries.upsert_visualization(
+                    db,
+                    viz_id=viz_id,
+                    paper_id=content_id,
+                    section_id=str(i+1),
+                    concept=scene.get("title", ""),
+                    storyboard={"description": scene.get("description", "")},
+                    manim_code=scene.get("code", ""),
+                    status="complete",
+                    video_url=f"/api/video/{viz_id}"
                 )
 
+            # Mark job complete
+            await queries.update_job_status(
+                db, job_id, 
+                status="completed",
+                current_step="Pipeline completed successfully", 
+                progress=1.0,
+                sections_completed=len(scenes),
+                sections_total=len(scenes)
+            )
+
+            # Step 4: Generate TTS audio and subtitles (non-blocking, non-fatal)
+            if narration_style != "none":
+                try:
+                    processing_config = ProcessingConfig(
+                        video_mode=VideoMode(video_mode),
+                        narration_style=NarrationStyle(narration_style),
+                        tts_provider=TTSProvider(tts_provider),
+                        language=language,
+                    )
+                    await _generate_tts_for_visualizations(
+                        db, content_id, processing_config
+                    )
+                except Exception as tts_err:
+                    logger.warning(f"TTS generation failed (non-fatal): {tts_err}")
+            
         except Exception as e:
             logger.exception(f"✗ UNIVERSAL JOB FAILED: {job_id}")
             logger.error(f"Error: {str(e)}")
@@ -297,142 +347,6 @@ async def process_universal_job(
             raise
 
 
-# ═══════════════════════════════════════════════════════════
-# Shared Rendering Pipeline
-# ═══════════════════════════════════════════════════════════
-
-async def _store_and_render_visualizations(db, job_id, content_id, generated_visualizations):
-    """Store visualization records and render them. Shared by both legacy and universal pipelines."""
-    # Create visualization records
-    logger.info("Creating visualization records in database...")
-    viz_records = []
-
-    content_suffix = content_id.replace(".", "").replace("/", "")[:8]
-
-    for i, visualization in enumerate(generated_visualizations):
-        viz_id = f"viz_{content_suffix}_{i+1}"
-        logger.info(f"  [{i+1}/{len(generated_visualizations)}] Creating record for {viz_id}")
-        logger.debug(f"    Concept: {visualization.concept}")
-        logger.debug(f"    Section: {visualization.section_id}")
-
-        await queries.upsert_visualization(
-            db,
-            viz_id=viz_id,
-            paper_id=content_id,
-            section_id=visualization.section_id,
-            concept=visualization.concept,
-            storyboard={"raw": visualization.storyboard},
-            manim_code=visualization.manim_code,
-            status="pending",
-        )
-        viz_records.append({
-            "id": viz_id,
-            "manim_code": visualization.manim_code,
-        })
-
-    if not viz_records:
-        logger.warning("No valid visualizations were generated")
-        await queries.update_job_status(
-            db, job_id,
-            status="completed",
-            current_step="No valid visualizations generated",
-            progress=1.0
-        )
-        return
-
-    # Render visualizations
-    logger.info("=" * 60)
-    logger.info(f"RENDERING {len(viz_records)} visualizations")
-    logger.info("=" * 60)
-
-    await queries.update_job_status(
-        db, job_id,
-        current_step="Generating animations",
-        progress=0.70,
-        sections_total=len(viz_records),
-        sections_completed=0
-    )
-
-    await queries.update_job_status(
-        db, job_id,
-        current_step="Rendering videos",
-        progress=0.75
-    )
-
-    render_semaphore = asyncio.Semaphore(3)
-    progress_lock = asyncio.Lock()
-    progress_bar = ProgressBar(len(viz_records), "Video Rendering")
-    completed_count = 0
-
-    async def _render_one(viz: dict, index: int):
-        nonlocal completed_count
-        async with render_semaphore:
-            try:
-                logger.info(f"Starting render: {viz['id']}")
-                video_url = await process_visualization(
-                    viz_id=viz["id"],
-                    manim_code=viz["manim_code"],
-                    quality="low_quality"
-                )
-                logger.info(f"✓ Successfully rendered {viz['id']}")
-                await queries.update_visualization_status(
-                    db, viz["id"],
-                    status="complete",
-                    video_url=video_url
-                )
-                progress_bar.update()
-
-                # Update job progress incrementally (75% to 95%)
-                async with progress_lock:
-                    completed_count += 1
-                    render_progress = 0.75 + (0.20 * (completed_count / len(viz_records)))
-                    await queries.update_job_status(
-                        db, job_id,
-                        progress=render_progress,
-                        sections_completed=completed_count
-                    )
-            except Exception as e:
-                logger.error(f"✗ Failed to render {viz['id']}: {str(e)}")
-                await queries.update_visualization_status(
-                    db, viz["id"],
-                    status="failed",
-                    error=str(e)
-                )
-                progress_bar.update()
-
-                # Still update progress even on failure
-                async with progress_lock:
-                    completed_count += 1
-                    render_progress = 0.75 + (0.20 * (completed_count / len(viz_records)))
-                    await queries.update_job_status(
-                        db, job_id,
-                        progress=render_progress,
-                        sections_completed=completed_count
-                    )
-
-    logger.info(f"Rendering {len(viz_records)} videos concurrently (max 3 parallel)...")
-    await asyncio.gather(*[
-        _render_one(viz, i) for i, viz in enumerate(viz_records)
-    ])
-
-    logger.info("All videos rendered!")
-
-    # Brief pause to ensure all DB commits have settled
-    await asyncio.sleep(0.5)
-
-    # Complete
-    await queries.update_job_status(
-        db, job_id,
-        status="completed",
-        current_step="Complete",
-        progress=1.0
-    )
-
-    logger.info("=" * 60)
-    logger.info(f"✓ JOB COMPLETED SUCCESSFULLY: {job_id}")
-    logger.info(f"✓ Content: {content_id}")
-    logger.info(f"✓ Visualizations rendered: {len(viz_records)}")
-    logger.info("=" * 60)
 
 
 # ═══════════════════════════════════════════════════════════

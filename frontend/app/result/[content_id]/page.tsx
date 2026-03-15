@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Download, Share2, PlayCircle, Loader2, ArrowLeft, FileText, Code, Database, Volume2 } from "lucide-react";
 import Link from "next/link";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = rawApiUrl.startsWith("http") ? rawApiUrl : `http://${rawApiUrl}`;
 
 interface Section {
     id: string;

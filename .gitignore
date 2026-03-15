@@ -52,8 +52,13 @@ backend/generated_output/
 backend/media/
 server/outputs/*
 !server/outputs/.gitkeep
+backend/public/
 
 # External MCP server clone
 manim-mcp-server/
 
 backend/bin
+
+# Document Reader data
+backend/docreader/uploads/
+backend/docreader/chroma_store/

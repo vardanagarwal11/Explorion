@@ -14,6 +14,16 @@ from dotenv import load_dotenv
 # (rendering/storage.py reads STORAGE_MODE at import time)
 load_dotenv()
 
+# --- MONKEY PATCH FOR PYTHON 3.14 WINDOWS HANG ---
+# In Python 3.14 on Windows, `platform.uname()` tries to query WMI via `_wmi_query()`.
+# This WMI query deadlocks the process indefinitely during import time (e.g. SQLAlchemy 2.0).
+# We proactively force an OSError which the standard library gracefully ignores.
+import platform
+def _patched_wmi_query(*args, **kwargs):
+    raise OSError("Monkey-patched to prevent Python 3.14 WMI deadlock")
+platform._wmi_query = _patched_wmi_query
+# -------------------------------------------------
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from api.routes import router as api_router
+from docreader import router as docreader_router
 from db import init_db
 
 
@@ -67,6 +78,7 @@ app.add_middleware(
 
 # Mount API router
 app.include_router(api_router)
+app.include_router(docreader_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -82,4 +94,10 @@ if __name__ == "__main__":
     # Support PORT (Render, Railway, Fly) and API_PORT (local)
     port = int(os.getenv("PORT") or os.getenv("API_PORT", "8000"))
 
-    uvicorn.run("main:app", host=host, port=port, reload=True)
+    uvicorn.run(
+        "main:app",
+        host=host,
+        port=port,
+        reload=True,
+        reload_excludes=["venv/*", ".remotion_runtime/*", "media/*", "__pycache__/*"],
+    )

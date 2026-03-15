@@ -1,0 +1,167 @@
+import time: self [us] | cumulative | imported package
+import time:        84 |         84 | winreg
+import time:       161 |        161 |   _io
+import time:        26 |         26 |   marshal
+import time:       167 |        167 |   nt
+import time:       515 |        867 | _frozen_importlib_external
+import time:       358 |        358 |   time
+import time:       194 |        552 | zipimport
+import time:        41 |         41 |     _codecs
+import time:       433 |        474 |   codecs
+import time:      1034 |       1034 |   encodings.aliases
+import time:       542 |        542 |   encodings._win_cp_codecs
+import time:      1303 |       3351 | encodings
+import time:       501 |        501 | encodings.utf_8
+import time:       735 |        735 | encodings.cp1252
+import time:        45 |         45 | _signal
+import time:        39 |         39 |       _abc
+import time:       158 |        196 |     abc
+import time:        47 |         47 |       _stat
+import time:       136 |        182 |     stat
+import time:       659 |        659 |     _collections_abc
+import time:        87 |         87 |       genericpath
+import time:        76 |         76 |       _winapi
+import time:       193 |        355 |     ntpath
+import time:       453 |       1844 |   os
+import time:        79 |         79 |   _sitebuiltins
+import time:        44 |         44 |   errno
+import time:       566 |        566 |   encodings.utf_8_sig
+import time:      1371 |       1371 |   _distutils_hack
+import time:       204 |        204 |   sitecustomize
+import time:      1678 |       5784 | site
+import time:       591 |        591 | linecache
+import time:       555 |        555 |   __future__
+import time:       109 |        109 |       itertools
+import time:       529 |        529 |       keyword
+import time:        96 |         96 |         _operator
+import time:       949 |       1045 |       operator
+import time:       628 |        628 |       reprlib
+import time:        69 |         69 |       _collections
+import time:      1218 |       3596 |     collections
+import time:       470 |        470 |     copyreg
+import time:        53 |         53 |         _types
+import time:       603 |        655 |       types
+import time:        60 |         60 |       _functools
+import time:       765 |       1480 |     functools
+import time:        31 |         31 |     _typing
+import time:      2292 |       7867 |   typing
+import time:       721 |        721 |     sqlalchemy.util.preloaded
+import time:        47 |         47 |         _contextvars
+import time:       487 |        487 |         _weakrefset
+import time:       977 |       1510 |       threading
+import time:       716 |        716 |       weakref
+import time:       375 |        375 |         sqlalchemy.cyextension
+import time:       100 |        100 |           zlib
+import time:      3310 |       3409 |         sqlalchemy.cyextension.collections
+import time:       650 |        650 |         sqlalchemy.cyextension.immutabledict
+import time:        63 |         63 |             _datetime
+import time:       639 |        701 |           datetime
+import time:      1642 |       1642 |             enum
+import time:        77 |         77 |               _sre
+import time:       653 |        653 |                 re._constants
+import time:       745 |       1397 |               re._parser
+import time:       492 |        492 |               re._casefix
+import time:       755 |       2719 |             re._compiler
+import time:       805 |       5165 |           re
+import time:       569 |       6433 |         sqlalchemy.cyextension.processors
+import time:       583 |        583 |         sqlalchemy.cyextension.resultproxy
+import time:        69 |         69 |                   _struct
+import time:       459 |        527 |                 struct
+import time:        53 |         53 |                 binascii
+import time:       574 |       1154 |               base64
+import time:       581 |        581 |                 copy
+import time:       713 |        713 |                       _ast
+import time:       663 |       1375 |                     ast
+import time:       904 |       2279 |                   annotationlib
+import time:       204 |        204 |                     io
+import time:        48 |         48 |                       _opcode
+import time:       531 |        531 |                       _opcode_metadata
+import time:       623 |       1201 |                     opcode
+import time:      1213 |       2617 |                   dis
+import time:       516 |        516 |                     importlib
+import time:        72 |        588 |                   importlib.machinery
+import time:       525 |        525 |                     token
+import time:        38 |         38 |                     _tokenize
+import time:      1064 |       1626 |                   tokenize
+import time:      1914 |       9022 |                 inspect
+import time:       941 |      10543 |               dataclasses
+import time:      4758 |       4758 |                 _hashlib
+import time:        56 |         56 |                 _blake2
+import time:       571 |       5384 |               hashlib
+import time:      3325 |       3325 |                 _wmi
+import time:      1149 |       4474 |               platform
+import time:      1103 |       1103 |               sysconfig
+import time:        40 |         40 |               _sysconfig
+import time:      3656 |       3656 |                 _socket
+import time:      1146 |       4802 |               socket
+import time: -380484126 | -380456630 |             sqlalchemy.util.compat
+import time:       708 | -380455922 |           sqlalchemy.exc
+import time:       622 | -380455301 |         sqlalchemy.cyextension.util
+import time:       527 | -380443325 |       sqlalchemy.util._has_cy
+import time:       760 | -380440340 |     sqlalchemy.util._collections
+import time:       888 | -380438732 |   sqlalchemy.util
+import time:       995 | -380429316 | sqlalchemy
+import time:      1690 |       1690 |   textwrap
+import time:      1969 |       1969 |     _py_warnings
+import time:      1433 |       3402 |   warnings
+import time:      1414 |       1414 |   codeop
+import time:      7262 |       7262 |   _colorize
+import time:      1515 |       1515 |   contextlib
+import time:      1958 |      17240 | traceback
+Traceback (most recent call last):
+  File "C:\Python314\Lib\platform.py", line 347, in _wmi_query
+    data = _wmi.exec_query("SELECT {} FROM {}".format(
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ",".join(keys),
+        ^^^^^^^^^^^^^^^
+        table,
+        ^^^^^^
+    )).split("\0")
+    ^^
+OSError: [WinError -2147217358] Windows Error 0x80041032
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sqlalchemy
+  File "D:\HackJKLU\Explorion\backend\venv\Lib\site-packages\sqlalchemy\__init__.py", line 12, in <module>
+    from . import util as _util
+  File "D:\HackJKLU\Explorion\backend\venv\Lib\site-packages\sqlalchemy\util\__init__.py", line 14, in <module>
+    from ._collections import coerce_generator_arg as coerce_generator_arg
+  File "D:\HackJKLU\Explorion\backend\venv\Lib\site-packages\sqlalchemy\util\_collections.py", line 38, in <module>
+    from ._has_cy import HAS_CYEXTENSION
+  File "D:\HackJKLU\Explorion\backend\venv\Lib\site-packages\sqlalchemy\util\_has_cy.py", line 32, in <module>
+    _import_cy_extensions()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\HackJKLU\Explorion\backend\venv\Lib\site-packages\sqlalchemy\util\_has_cy.py", line 20, in _import_cy_extensions
+    from ..cyextension import util
+  File "lib/sqlalchemy/cyextension/util.pyx", line 9, in init sqlalchemy.cyextension.util
+  File "D:\HackJKLU\Explorion\backend\venv\Lib\site-packages\sqlalchemy\exc.py", line 26, in <module>
+    from .util import compat
+  File "D:\HackJKLU\Explorion\backend\venv\Lib\site-packages\sqlalchemy\util\compat.py", line 51, in <module>
+    arm = "aarch" in platform.machine().lower()
+                     ~~~~~~~~~~~~~~~~^^
+  File "C:\Python314\Lib\platform.py", line 1127, in machine
+    return uname().machine
+           ~~~~~^^
+  File "C:\Python314\Lib\platform.py", line 1016, in uname
+    release, version, csd, ptype = win32_ver()
+                                   ~~~~~~~~~^^
+  File "C:\Python314\Lib\platform.py", line 467, in win32_ver
+    version, csd, ptype, is_client = _win32_ver(version, csd, ptype)
+                                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\platform.py", line 408, in _win32_ver
+    (version, product_type, ptype, spmajor, spminor)  = _wmi_query(
+                                                        ~~~~~~~~~~^
+        'OS',
+        ^^^^^
+    ...<4 lines>...
+        'ServicePackMinorVersion',
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Python314\Lib\platform.py", line 353, in _wmi_query
+    raise OSError("not supported")
+          ~~~~~~~^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

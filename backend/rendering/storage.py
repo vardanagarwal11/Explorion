@@ -1,5 +1,5 @@
 """
-Video storage backends for arXivisual.
+Video storage backends for Explorion.
 
 STORAGE_MODE env var controls which backend is used:
   - "local" (default): filesystem storage in ./media/videos/

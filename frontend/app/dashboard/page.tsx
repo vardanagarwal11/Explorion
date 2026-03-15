@@ -57,7 +57,7 @@ export default function Dashboard() {
                             animate={{ opacity: 1, y: 0 }}
                             className="text-3xl md:text-5xl font-bold tracking-widest uppercase flex items-center gap-4"
                         >
-                            <Image src="/logo.png" alt="Explorion" width={40} height={40} className="object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
+                            <Image src="/logo-new.png" alt="Explorion" width={52} height={52} className="object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
                             Data Core
                             <span className="text-xs bg-white/10 text-white/70 px-2 py-1 rounded font-normal leading-none tracking-normal">
                                 {papers.length} ENTRY(S)
