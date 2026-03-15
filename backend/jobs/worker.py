@@ -6,9 +6,13 @@ Supports legacy paper-only mode and universal content processing.
 """
 
 import asyncio
+import json
 import logging
+import re
+import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 from db.connection import async_session_maker
 from db import queries
 from db.models import Section
@@ -35,6 +39,74 @@ from models.content import (
 
 logger = logging.getLogger(__name__)
 
+# Root directory for per-paper pipeline run artifacts (JSON, code, videos)
+PIPELINE_RUNS_DIR = Path(__file__).resolve().parent.parent / "media" / "pipeline_runs"
+
+
+def _sanitize_content_id_for_path(content_id: str) -> str:
+    """Make content_id safe for use as a directory name."""
+    if not content_id or not content_id.strip():
+        return "unknown"
+    s = content_id.strip()
+    s = re.sub(r'[<>:"/\\|?*]', "_", s)
+    s = re.sub(r"\s+", "_", s)
+    return s[:120] or "unknown"
+
+
+def _save_pipeline_run(content_id: str, result: dict) -> None:
+    """
+    Save pipeline run artifacts under media/pipeline_runs/<content_id>/:
+    - run.json: summary, plan, scenes (with code and video_path refs), errors
+    - scene_0.py, scene_1.py, ...: generated Manim code per scene
+    - scene_0.mp4, scene_1.mp4, ...: copies of rendered videos (when available)
+    """
+    folder_name = _sanitize_content_id_for_path(content_id)
+    run_dir = PIPELINE_RUNS_DIR / folder_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    summary = result.get("summary", {})
+    plan = result.get("plan", [])
+    scenes = result.get("scenes", [])
+    errors = result.get("errors", [])
+
+    run_payload = {
+        "content_id": content_id,
+        "title": result.get("title", ""),
+        "summary": summary,
+        "plan": plan,
+        "scenes": [
+            {
+                "title": s.get("title", ""),
+                "description": s.get("description", ""),
+                "code_file": f"scene_{i}.py",
+                "video_file": f"scene_{i}.mp4",
+            }
+            for i, s in enumerate(scenes)
+        ],
+        "errors": errors,
+    }
+    run_path = run_dir / "run.json"
+    with open(run_path, "w", encoding="utf-8") as f:
+        json.dump(run_payload, f, indent=2, ensure_ascii=False)
+    logger.info("Wrote pipeline run JSON: %s", run_path)
+
+    for i, scene in enumerate(scenes):
+        code = scene.get("code", "")
+        if code:
+            code_path = run_dir / f"scene_{i}.py"
+            code_path.write_text(code, encoding="utf-8")
+            logger.debug("Wrote code: %s", code_path)
+
+        video_path = scene.get("video_path", "")
+        if video_path:
+            src = Path(video_path)
+            if src.is_file():
+                dst = run_dir / f"scene_{i}.mp4"
+                shutil.copy2(src, dst)
+                logger.debug("Copied video: %s -> %s", src, dst)
+            else:
+                logger.warning("Video path not found for scene %d: %s", i, video_path)
+
 
 def _truncate_words(text: str, max_words: int) -> str:
     """Return text trimmed to max_words with stable ellipsis behavior."""
@@ -42,6 +114,24 @@ def _truncate_words(text: str, max_words: int) -> str:
     if len(words) <= max_words:
         return (text or "").strip()
     return " ".join(words[:max_words]).rstrip(".,;:") + "..."
+
+
+# Blocklist for concept titles — skip non-explanatory sections that leaked through ingestion
+CONCEPT_BLOCKLIST = {
+    "download", "pdf", "export", "versions", "cite", "related",
+    "funding", "acknowledgment", "conflict of interest", "author",
+}
+
+
+def is_valid_concept(concept: dict) -> bool:
+    """Return True only if this concept should get a video (no junk/metadata sections)."""
+    title = ((concept.get("title") or concept.get("name")) or "").lower()
+    description = (concept.get("description") or concept.get("explanation")) or ""
+    if any(block in title for block in CONCEPT_BLOCKLIST):
+        return False
+    if len(description.strip()) < 40:
+        return False
+    return True
 
 
 class ProgressBar:
@@ -163,20 +253,22 @@ async def process_paper_job(job_id: str, arxiv_id: str):
                 db_sections = list(db_paper.sections)
                 db_sections.sort(key=lambda s: getattr(s, "order_index", 0) or 0)
                 if db_sections:
+                    raw_concepts = [{
+                        "name": s.title,
+                        "explanation": _truncate_words(s.summary or s.content or "No content", 24),
+                        "visualization_opportunity": _truncate_words(f"Visualize the core mechanism from {s.title}", 12)
+                    } for s in db_sections]
+                    main_concepts = [c for c in raw_concepts if is_valid_concept(c)]
                     pipeline_kwargs["summary"] = {
                         "title": db_paper.title,
-                        "main_concepts": [{
-                            "name": s.title,
-                            "explanation": _truncate_words(s.summary or s.content or "No content", 24),
-                            "visualization_opportunity": _truncate_words(f"Visualize the core mechanism from {s.title}", 12)
-                        } for s in db_sections]
+                        "main_concepts": main_concepts,
                     }
-                    # Pre-insert placeholder visualizations so the UI starts polling
-                    for i, s in enumerate(db_sections):
+                    # Pre-insert placeholder visualizations so the UI starts polling (one per filtered concept)
+                    for i, c in enumerate(main_concepts):
                         viz_id = f"{arxiv_id}_{i}"
                         await queries.upsert_visualization(
-                            db, viz_id=viz_id, paper_id=arxiv_id, section_id=str(i+1),
-                            concept=s.title, storyboard={"description": "Generating visualization..."},
+                            db, viz_id=viz_id, paper_id=arxiv_id, section_id=str(i + 1),
+                            concept=c.get("name", ""), storyboard={"description": "Generating visualization..."},
                             manim_code="", status="pending", video_url=""
                         )
 
@@ -191,9 +283,13 @@ async def process_paper_job(job_id: str, arxiv_id: str):
             if not scenes:
                 raise RuntimeError("Pipeline finished but generated 0 scenes.")
 
-            # Record completed videos in database so the UI can stream them
             content_id = result.get("content_id") or arxiv_id
-            
+            try:
+                _save_pipeline_run(content_id, result)
+            except Exception as save_err:
+                logger.warning("Failed to save pipeline run artifacts: %s", save_err)
+
+            # Record completed videos in database so the UI can stream them
             for i, scene in enumerate(scenes):
                 viz_id = f"{content_id}_{i}"
                 
@@ -323,20 +419,22 @@ async def process_universal_job(
                 db_sections = list(db_paper.sections)
                 db_sections.sort(key=lambda s: getattr(s, "order_index", 0) or 0)
                 if db_sections:
+                    raw_concepts = [{
+                        "name": s.title,
+                        "explanation": _truncate_words(s.summary or s.content or "No content", 24),
+                        "visualization_opportunity": _truncate_words(f"Visualize the core mechanism from {s.title}", 12)
+                    } for s in db_sections]
+                    main_concepts = [c for c in raw_concepts if is_valid_concept(c)]
                     pipeline_kwargs["summary"] = {
                         "title": db_paper.title,
-                        "main_concepts": [{
-                            "name": s.title,
-                            "explanation": _truncate_words(s.summary or s.content or "No content", 24),
-                            "visualization_opportunity": _truncate_words(f"Visualize the core mechanism from {s.title}", 12)
-                        } for s in db_sections]
+                        "main_concepts": main_concepts,
                     }
-                    # Pre-insert placeholder visualizations so the UI starts polling
-                    for i, s in enumerate(db_sections):
+                    # Pre-insert placeholder visualizations so the UI starts polling (one per filtered concept)
+                    for i, c in enumerate(main_concepts):
                         viz_id = f"{content_id}_{i}"
                         await queries.upsert_visualization(
-                            db, viz_id=viz_id, paper_id=content_id, section_id=str(i+1),
-                            concept=s.title, storyboard={"description": "Generating visualization..."},
+                            db, viz_id=viz_id, paper_id=content_id, section_id=str(i + 1),
+                            concept=c.get("name", ""), storyboard={"description": "Generating visualization..."},
                             manim_code="", status="pending", video_url=""
                         )
 
@@ -350,6 +448,12 @@ async def process_universal_job(
 
             if not scenes:
                 raise RuntimeError("Unified pipeline finished but generated 0 scenes.")
+
+            content_id = result.get("content_id") or content_id
+            try:
+                _save_pipeline_run(content_id, result)
+            except Exception as save_err:
+                logger.warning("Failed to save pipeline run artifacts: %s", save_err)
 
             # Step 3: Store and map the locally rendered videos
             for i, scene in enumerate(scenes):

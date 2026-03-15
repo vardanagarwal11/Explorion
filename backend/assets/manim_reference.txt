@@ -1,0 +1,3156 @@
+
+
+============================================================
+MODULE: manim.animation.transform
+============================================================
+"""Animations transforming one mobject into another."""
+
+from __future__ import annotations
+
+__all__ = [
+ "Transform",
+ "ReplacementTransform",
+ "TransformFromCopy",
+ "ClockwiseTransform",
+ "CounterclockwiseTransform",
+ "MoveToTarget",
+ "ApplyMethod",
+ "ApplyPointwiseFunction",
+ "ApplyPointwiseFunctionToCenter",
+ "FadeToColor",
+ "FadeTransform",
+ "FadeTransformPieces",
+ "ScaleInPlace",
+ "ShrinkToCenter",
+ "Restore",
+ "ApplyFunction",
+ "ApplyMatrix",
+ "ApplyComplexFunction",
+ "CyclicReplace",
+ "Swap",
+ "TransformAnimations",
+]
+
+import inspect
+import types
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+from manim.data_structures import MethodWithArgs
+from manim.mobject.opengl.opengl_mobject import OpenGLGroup, OpenGLMobject
+
+from .. import config
+from ..animation.animation import Animation
+from ..constants import (
+ DEFAULT_POINTWISE_FUNCTION_RUN_TIME,
+ DEGREES,
+ ORIGIN,
+ OUT,
+ RendererType,
+)
+from ..mobject.mobject import Group, Mobject
+from ..utils.paths import path_along_arc, path_along_circles
+from ..utils.rate_functions import smooth, squish_rate_func
+
+if TYPE_CHECKING:
+ from ..scene.scene import Scene
+ from ..typing import Point3DLike, Point3DLike_Array
+
+
+[docs]
+class Transform(Animation):
+ """A Transform transforms a Mobject into a target Mobject.
+
+ Parameters
+ ----------
+ mobject
+ The :class:`.Mobject` to be transformed. It will be mutated to become the ``target_mobject``.
+ target_mobject
+ The target of the transformation.
+ path_func
+ A function defining the path that the points of the ``mobject`` are being moved
+ along until they match the points of the ``target_mobject``, see :mod:`.utils.paths`.
+ path_arc
+ The arc angle (in radians) that the points of ``mobject`` will follow to reach
+ the points of the target if using a circular path arc, see ``path_arc_centers``.
+ See also :func:`manim.utils.paths.path_along_arc`.
+ path_arc_axis
+ The axis to rotate along if using a circular path arc, see ``path_arc_centers``.
+ path_arc_centers
+ The center of the circular arcs along which the points of ``mobject`` are
+ moved by the transformation.
+
+ If this is set and ``path_func`` is not set, then a ``path_along_circles`` path will be generated
+ using the ``path_arc`` parameters and stored in ``path_func``. If ``path_func`` is set, this and the
+ other ``path_arc`` fields are set as attributes, but a ``path_func`` is not generated from it.
+ replace_mobject_with_target_in_scene
+ Controls which mobject is replaced when the transformation is complete.
+
+ If set to True, ``mobject`` will be removed from the scene and ``target_mobject`` will
+ replace it. Otherwise, ``target_mobject`` is never added and ``mobject`` just takes its shape.
+
+ Examples
+ --------
+
+ .. manim :: TransformPathArc
+
+ class TransformPathArc(Scene):
+ def construct(self):
+ def make_arc_path(start, end, arc_angle):
+ points = []
+ p_fn = path_along_arc(arc_angle)
+ # alpha animates between 0.0 and 1.0, where 0.0
+ # is the beginning of the animation and 1.0 is the end.
+ for alpha in range(0, 11):
+ points.append(p_fn(start, end, alpha / 10.0))
+ path = VMobject(stroke_color=YELLOW)
+ path.set_points_smoothly(points)
+ return path
+
+ left = Circle(stroke_color=BLUE_E, fill_opacity=1.0, radius=0.5).move_to(LEFT * 2)
+ colors = [TEAL_A, TEAL_B, TEAL_C, TEAL_D, TEAL_E, GREEN_A]
+ # Positive angles move counter-clockwise, negative angles move clockwise.
+ examples = [-90, 0, 30, 90, 180, 270]
+ anims = []
+ for idx, angle in enumerate(examples):
+ left_c = left.copy().shift((3 - idx) * UP)
+ left_c.fill_color = colors[idx]
+ right_c = left_c.copy().shift(4 * RIGHT)
+ path_arc = make_arc_path(left_c.get_center(), right_c.get_center(),
+ arc_angle=angle * DEGREES)
+ desc = Text('%d°' % examples[idx]).next_to(left_c, LEFT)
+ # Make the circles in front of the text in front of the arcs.
+ self.add(
+ path_arc.set_z_index(1),
+ desc.set_z_index(2),
+ left_c.set_z_index(3),
+ )
+ anims.append(Transform(left_c, right_c, path_arc=angle * DEGREES))
+
+ self.play(*anims, run_time=2)
+ self.wait()
+
+ See also
+ --------
+ :class:`~.ReplacementTransform`, :meth:`~.Mobject.interpolate`, :meth:`~.Mobject.align_data`
+ """
+
+ def __init__(
+ self,
+ mobject: Mobject | None,
+ target_mobject: Mobject | None = None,
+ path_func: Callable | None = None,
+ path_arc: float = 0,
+ path_arc_axis: np.ndarray = OUT,
+ path_arc_centers: Point3DLike | Point3DLike_Array | None = None,
+ replace_mobject_with_target_in_scene: bool = False,
+ **kwargs,
+ ) -> None:
+ self.path_arc_axis: np.ndarray = path_arc_axis
+ self.path_arc_centers: Point3DLike | Point3DLike_Array | None = path_arc_centers
+ self.path_arc: float = path_arc
+
+ # path_func is a property a few lines below so it doesn't need to be set in any case
+ if path_func is not None:
+ self.path_func: Callable = path_func
+ elif self.path_arc_centers is not None:
+ self.path_func = path_along_circles(
+ path_arc,
+ self.path_arc_centers,
+ self.path_arc_axis,
+ )
+
+ self.replace_mobject_with_target_in_scene: bool = (
+ replace_mobject_with_target_in_scene
+ )
+ self.target_mobject: Mobject = (
+ target_mobject if target_mobject is not None else Mobject()
+ )
+ super().__init__(mobject, **kwargs)
+
+ @property
+ def path_arc(self) -> float:
+ return self._path_arc
+
+ @path_arc.setter
+ def path_arc(self, path_arc: float) -> None:
+ self._path_arc = path_arc
+ self._path_func = path_along_arc(
+ arc_angle=self._path_arc,
+ axis=self.path_arc_axis,
+ )
+
+ @property
+ def path_func(
+ self,
+ ) -> Callable[
+ [Iterable[np.ndarray], Iterable[np.ndarray], float],
+ Iterable[np.ndarray],
+ ]:
+ return self._path_func
+
+ @path_func.setter
+ def path_func(
+ self,
+ path_func: Callable[
+ [Iterable[np.ndarray], Iterable[np.ndarray], float],
+ Iterable[np.ndarray],
+ ],
+ ) -> None:
+ if path_func is not None:
+ self._path_func = path_func
+
+
+[docs]
+ def begin(self) -> None:
+ # Use a copy of target_mobject for the align_data
+ # call so that the actual target_mobject stays
+ # preserved.
+ self.target_mobject = self.create_target()
+ self.target_copy = self.target_mobject.copy()
+ # Note, this potentially changes the structure
+ # of both mobject and target_mobject
+ if config.renderer == RendererType.OPENGL:
+ self.mobject.align_data_and_family(self.target_copy)
+ else:
+ self.mobject.align_data(self.target_copy)
+ super().begin()
+
+
+============================================================
+MODULE: manim.animation.fading
+============================================================
+"""Fading in and out of view.
+
+.. manim:: Fading
+
+ class Fading(Scene):
+ def construct(self):
+ tex_in = Tex("Fade", "In").scale(3)
+ tex_out = Tex("Fade", "Out").scale(3)
+ self.play(FadeIn(tex_in, shift=DOWN, scale=0.66))
+ self.play(ReplacementTransform(tex_in, tex_out))
+ self.play(FadeOut(tex_out, shift=DOWN * 2, scale=1.5))
+
+"""
+
+from __future__ import annotations
+
+__all__ = [
+ "FadeOut",
+ "FadeIn",
+]
+
+from typing import Any
+
+import numpy as np
+
+from manim.mobject.opengl.opengl_mobject import OpenGLMobject
+
+from ..animation.transform import Transform
+from ..constants import ORIGIN
+from ..mobject.mobject import Group, Mobject
+from ..scene.scene import Scene
+
+
+class _Fade(Transform):
+ """Fade :class:`~.Mobject` s in or out.
+
+ Parameters
+ ----------
+ mobjects
+ The mobjects to be faded.
+ shift
+ The vector by which the mobject shifts while being faded.
+ target_position
+ The position to/from which the mobject moves while being faded in. In case
+ another mobject is given as target position, its center is used.
+ scale
+ The factor by which the mobject is scaled initially before being rescaling to
+ its original size while being faded in.
+
+ """
+
+ def __init__(
+ self,
+ *mobjects: Mobject,
+ shift: np.ndarray | None = None,
+ target_position: np.ndarray | Mobject | None = None,
+ scale: float = 1,
+ **kwargs: Any,
+ ) -> None:
+ if not mobjects:
+ raise ValueError("At least one mobject must be passed.")
+ mobject = mobjects[0] if len(mobjects) == 1 else Group(*mobjects)
+
+ self.point_target = False
+ if shift is None:
+ if target_position is not None:
+ if isinstance(target_position, (Mobject, OpenGLMobject)):
+ target_position = target_position.get_center()
+ shift = target_position - mobject.get_center()
+ self.point_target = True
+ else:
+ shift = ORIGIN
+ self.shift_vector = shift
+ self.scale_factor = scale
+ super().__init__(mobject, **kwargs)
+
+ def _create_faded_mobject(self, fadeIn: bool) -> Mobject:
+ """Create a faded, shifted and scaled copy of the mobject.
+
+ Parameters
+ ----------
+ fadeIn
+ Whether the faded mobject is used to fade in.
+
+ Returns
+ -------
+ Mobject
+ The faded, shifted and scaled copy of the mobject.
+ """
+ faded_mobject: Mobject = self.mobject.copy() # type: ignore[assignment]
+ faded_mobject.fade(1)
+ direction_modifier = -1 if fadeIn and not self.point_target else 1
+ faded_mobject.shift(self.shift_vector * direction_modifier)
+ faded_mobject.scale(self.scale_factor)
+ return faded_mobject
+
+
+[docs]
+class FadeIn(_Fade):
+ r"""Fade in :class:`~.Mobject` s.
+
+ Parameters
+ ----------
+ mobjects
+ The mobjects to be faded in.
+ shift
+ The vector by which the mobject shifts while being faded in.
+ target_position
+ The position from which the mobject starts while being faded in. In case
+ another mobject is given as target position, its center is used.
+ scale
+ The factor by which the mobject is scaled initially before being rescaling to
+ its original size while being faded in.
+
+ Examples
+ --------
+
+ .. manim :: FadeInExample
+
+ class FadeInExample(Scene):
+ def construct(self):
+ dot = Dot(UP * 2 + LEFT)
+ self.add(dot)
+ tex = Tex(
+ "FadeIn with ", "shift ", r" or target\_position", " and scale"
+ ).scale(1)
+ animations = [
+ FadeIn(tex[0]),
+ FadeIn(tex[1], shift=DOWN),
+ FadeIn(tex[2], target_position=dot),
+ FadeIn(tex[3], scale=1.5),
+ ]
+ self.play(AnimationGroup(*animations, lag_ratio=0.5))
+
+ """
+
+ def __init__(self, *mobjects: Mobject, **kwargs: Any) -> None:
+ super().__init__(*mobjects, introducer=True, **kwargs)
+
+ def create_target(self) -> Mobject:
+ return self.mobject # type: ignore[return-value]
+
+ def create_starting_mobject(self) -> Mobject:
+ return self._create_faded_mobject(fadeIn=True)
+
+
+============================================================
+MODULE: manim.animation.creation
+============================================================
+r"""Animate the display or removal of a mobject from a scene.
+
+.. manim:: CreationModule
+ :hide_source:
+
+ from manim import ManimBanner
+ class CreationModule(Scene):
+ def construct(self):
+ s1 = Square()
+ s2 = Square()
+ s3 = Square()
+ s4 = Square()
+ VGroup(s1, s2, s3, s4).set_x(0).arrange(buff=1.9).shift(UP)
+ s5 = Square()
+ s6 = Square()
+ s7 = Square()
+ VGroup(s5, s6, s7).set_x(0).arrange(buff=2.6).shift(2 * DOWN)
+ t1 = Text("Write", font_size=24).next_to(s1, UP)
+ t2 = Text("AddTextLetterByLetter", font_size=24).next_to(s2, UP)
+ t3 = Text("Create", font_size=24).next_to(s3, UP)
+ t4 = Text("Uncreate", font_size=24).next_to(s4, UP)
+ t5 = Text("DrawBorderThenFill", font_size=24).next_to(s5, UP)
+ t6 = Text("ShowIncreasingSubsets", font_size=22).next_to(s6, UP)
+ t7 = Text("ShowSubmobjectsOneByOne", font_size=22).next_to(s7, UP)
+
+ self.add(s1, s2, s3, s4, s5, s6, s7, t1, t2, t3, t4, t5, t6, t7)
+
+ texts = [Text("manim", font_size=29), Text("manim", font_size=29)]
+ texts[0].move_to(s1.get_center())
+ texts[1].move_to(s2.get_center())
+ self.add(*texts)
+
+ objs = [ManimBanner().scale(0.25) for _ in range(5)]
+ objs[0].move_to(s3.get_center())
+ objs[1].move_to(s4.get_center())
+ objs[2].move_to(s5.get_center())
+ objs[3].move_to(s6.get_center())
+ objs[4].move_to(s7.get_center())
+ self.add(*objs)
+
+ self.play(
+ # text creation
+ Write(texts[0]),
+ AddTextLetterByLetter(texts[1]),
+ # mobject creation
+ Create(objs[0]),
+ Uncreate(objs[1]),
+ DrawBorderThenFill(objs[2]),
+ ShowIncreasingSubsets(objs[3]),
+ ShowSubmobjectsOneByOne(objs[4]),
+ run_time=3,
+ )
+
+ self.wait()
+
+"""
+
+from __future__ import annotations
+
+__all__ = [
+ "Create",
+ "Uncreate",
+ "DrawBorderThenFill",
+ "Write",
+ "Unwrite",
+ "ShowPartial",
+ "ShowIncreasingSubsets",
+ "SpiralIn",
+ "AddTextLetterByLetter",
+ "RemoveTextLetterByLetter",
+ "ShowSubmobjectsOneByOne",
+ "AddTextWordByWord",
+ "TypeWithCursor",
+ "UntypeWithCursor",
+]
+
+
+import itertools as it
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+ from manim.mobject.text.text_mobject import Text
+ from manim.scene.scene import Scene
+
+from manim.constants import RIGHT, TAU
+from manim.mobject.opengl.opengl_surface import OpenGLSurface
+from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
+from manim.utils.color import ManimColor
+
+from .. import config
+from ..animation.animation import Animation
+from ..animation.composition import Succession
+from ..mobject.mobject import Group, Mobject
+from ..mobject.types.vectorized_mobject import VMobject
+from ..utils.bezier import integer_interpolate
+from ..utils.rate_functions import double_smooth, linear
+
+
+[docs]
+class ShowPartial(Animation):
+ """Abstract class for Animations that show the VMobject partially.
+
+ Raises
+ ------
+ :class:`TypeError`
+ If ``mobject`` is not an instance of :class:`~.VMobject`.
+
+ See Also
+ --------
+ :class:`Create`, :class:`~.ShowPassingFlash`
+
+ """
+
+ def __init__(
+ self,
+ mobject: VMobject | OpenGLVMobject | OpenGLSurface | None,
+ **kwargs,
+ ):
+ pointwise = getattr(mobject, "pointwise_become_partial", None)
+ if not callable(pointwise):
+ raise TypeError(f"{self.__class__.__name__} only works for VMobjects.")
+ super().__init__(mobject, **kwargs)
+
+ def interpolate_submobject(
+ self,
+ submobject: Mobject,
+ starting_submobject: Mobject,
+ alpha: float,
+ ) -> None:
+ submobject.pointwise_become_partial(
+ starting_submobject, *self._get_bounds(alpha)
+ )
+
+ def _get_bounds(self, alpha: float) -> tuple[float, float]:
+ raise NotImplementedError("Please use Create or ShowPassingFlash")
+
+
+============================================================
+MODULE: manim.animation.movement
+============================================================
+"""Animations related to movement."""
+
+from __future__ import annotations
+
+__all__ = [
+ "Homotopy",
+ "SmoothedVectorizedHomotopy",
+ "ComplexHomotopy",
+ "PhaseFlow",
+ "MoveAlongPath",
+]
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+from ..animation.animation import Animation
+from ..utils.rate_functions import linear
+
+if TYPE_CHECKING:
+ from typing import Self
+
+ from manim.mobject.types.vectorized_mobject import VMobject
+ from manim.typing import MappingFunction, Point3D
+ from manim.utils.rate_functions import RateFunction
+
+ from ..mobject.mobject import Mobject
+
+
+[docs]
+class Homotopy(Animation):
+ """A Homotopy.
+
+ This is an animation transforming the points of a mobject according
+ to the specified transformation function. With the parameter :math:`t`
+ moving from 0 to 1 throughout the animation and :math:`(x, y, z)`
+ describing the coordinates of the point of a mobject,
+ the function passed to the ``homotopy`` keyword argument should
+ transform the tuple :math:`(x, y, z, t)` to :math:`(x', y', z')`,
+ the coordinates the original point is transformed to at time :math:`t`.
+
+ Parameters
+ ----------
+ homotopy
+ A function mapping :math:`(x, y, z, t)` to :math:`(x', y', z')`.
+ mobject
+ The mobject transformed under the given homotopy.
+ run_time
+ The run time of the animation.
+ apply_function_kwargs
+ Keyword arguments propagated to :meth:`.Mobject.apply_function`.
+ kwargs
+ Further keyword arguments passed to the parent class.
+
+ Examples
+ --------
+
+ .. manim:: HomotopyExample
+
+ class HomotopyExample(Scene):
+ def construct(self):
+ square = Square()
+
+ def homotopy(x, y, z, t):
+ if t <= 0.25:
+ progress = t / 0.25
+ return (x, y + progress * 0.2 * np.sin(x), z)
+ else:
+ wave_progress = (t - 0.25) / 0.75
+ return (x, y + 0.2 * np.sin(x + 10 * wave_progress), z)
+
+ self.play(Homotopy(homotopy, square, rate_func= linear, run_time=2))
+
+ """
+
+ def __init__(
+ self,
+ homotopy: Callable[[float, float, float, float], tuple[float, float, float]],
+ mobject: Mobject,
+ run_time: float = 3,
+ apply_function_kwargs: dict[str, Any] | None = None,
+ **kwargs: Any,
+ ):
+ self.homotopy = homotopy
+ self.apply_function_kwargs = (
+ apply_function_kwargs if apply_function_kwargs is not None else {}
+ )
+ super().__init__(mobject, run_time=run_time, **kwargs)
+
+ def function_at_time_t(self, t: float) -> MappingFunction:
+ def mapping_function(p: Point3D) -> Point3D:
+ x, y, z = p
+ return np.array(self.homotopy(x, y, z, t))
+
+ return mapping_function
+
+ def interpolate_submobject(
+ self,
+ submobject: Mobject,
+ starting_submobject: Mobject,
+ alpha: float,
+ ) -> Self:
+ submobject.points = starting_submobject.points
+ submobject.apply_function(
+ self.function_at_time_t(alpha),
+ **self.apply_function_kwargs,
+ )
+ return self
+
+
+============================================================
+MODULE: manim.animation.indication
+============================================================
+"""Animations drawing attention to particular mobjects.
+
+Examples
+--------
+
+.. manim:: Indications
+
+ class Indications(Scene):
+ def construct(self):
+ indications = [ApplyWave,Circumscribe,Flash,FocusOn,Indicate,ShowPassingFlash,Wiggle]
+ names = [Tex(i.__name__).scale(3) for i in indications]
+
+ self.add(names[0])
+ for i in range(len(names)):
+ if indications[i] is Flash:
+ self.play(Flash(UP))
+ elif indications[i] is ShowPassingFlash:
+ self.play(ShowPassingFlash(Underline(names[i])))
+ else:
+ self.play(indications[i](names[i]))
+ self.play(AnimationGroup(
+ FadeOut(names[i], shift=UP*1.5),
+ FadeIn(names[(i+1)%len(names)], shift=UP*1.5),
+ ))
+
+"""
+
+from __future__ import annotations
+
+__all__ = [
+ "FocusOn",
+ "Indicate",
+ "Flash",
+ "ShowPassingFlash",
+ "ShowPassingFlashWithThinningStrokeWidth",
+ "ApplyWave",
+ "Circumscribe",
+ "Wiggle",
+ "Blink",
+]
+
+from collections.abc import Iterable
+from typing import Any, Self
+
+import numpy as np
+
+from manim.mobject.geometry.arc import Circle, Dot
+from manim.mobject.geometry.line import Line
+from manim.mobject.geometry.polygram import Rectangle
+from manim.mobject.geometry.shape_matchers import SurroundingRectangle
+from manim.mobject.opengl.opengl_mobject import OpenGLMobject
+from manim.scene.scene import Scene
+
+from .. import config
+from ..animation.animation import Animation
+from ..animation.composition import AnimationGroup, Succession
+from ..animation.creation import Create, ShowPartial, Uncreate
+from ..animation.fading import FadeIn, FadeOut
+from ..animation.movement import Homotopy
+from ..animation.transform import Transform
+from ..animation.updaters.update import UpdateFromFunc
+from ..constants import *
+from ..mobject.mobject import Mobject
+from ..mobject.types.vectorized_mobject import VGroup, VMobject
+from ..typing import Point3D, Point3DLike, Vector3DLike
+from ..utils.bezier import interpolate, inverse_interpolate
+from ..utils.color import GREY, PURE_YELLOW, ParsableManimColor
+from ..utils.rate_functions import RateFunction, smooth, there_and_back, wiggle
+from ..utils.space_ops import normalize
+
+
+[docs]
+class FocusOn(Transform):
+ """Shrink a spotlight to a position.
+
+ Parameters
+ ----------
+ focus_point
+ The point at which to shrink the spotlight. If it is a :class:`.~Mobject` its center will be used.
+ opacity
+ The opacity of the spotlight.
+ color
+ The color of the spotlight.
+ run_time
+ The duration of the animation.
+
+ Examples
+ --------
+ .. manim:: UsingFocusOn
+
+ class UsingFocusOn(Scene):
+ def construct(self):
+ dot = Dot(color=PURE_YELLOW).shift(DOWN)
+ self.add(Tex("Focusing on the dot below:"), dot)
+ self.play(FocusOn(dot))
+ self.wait()
+ """
+
+ def __init__(
+ self,
+ focus_point: Point3DLike | Mobject,
+ opacity: float = 0.2,
+ color: ParsableManimColor = GREY,
+ run_time: float = 2,
+ **kwargs: Any,
+ ):
+ self.focus_point = focus_point
+ self.color = color
+ self.opacity = opacity
+ remover = True
+ starting_dot = Dot(
+ radius=config["frame_x_radius"] + config["frame_y_radius"],
+ stroke_width=0,
+ fill_color=self.color,
+ fill_opacity=0,
+ )
+ super().__init__(starting_dot, run_time=run_time, remover=remover, **kwargs)
+
+ def create_target(self) -> Dot:
+ little_dot = Dot(radius=0)
+ little_dot.set_fill(self.color, opacity=self.opacity)
+ little_dot.add_updater(lambda d: d.move_to(self.focus_point))
+ return little_dot
+
+
+============================================================
+MODULE: manim.animation.growing
+============================================================
+"""Animations that introduce mobjects to scene by growing them from points.
+
+.. manim:: Growing
+
+ class Growing(Scene):
+ def construct(self):
+ square = Square()
+ circle = Circle()
+ triangle = Triangle()
+ arrow = Arrow(LEFT, RIGHT)
+ star = Star()
+
+ VGroup(square, circle, triangle).set_x(0).arrange(buff=1.5).set_y(2)
+ VGroup(arrow, star).move_to(DOWN).set_x(0).arrange(buff=1.5).set_y(-2)
+
+ self.play(GrowFromPoint(square, ORIGIN))
+ self.play(GrowFromCenter(circle))
+ self.play(GrowFromEdge(triangle, DOWN))
+ self.play(GrowArrow(arrow))
+ self.play(SpinInFromNothing(star))
+
+"""
+
+from __future__ import annotations
+
+__all__ = [
+ "GrowFromPoint",
+ "GrowFromCenter",
+ "GrowFromEdge",
+ "GrowArrow",
+ "SpinInFromNothing",
+]
+
+from typing import TYPE_CHECKING, Any
+
+from ..animation.transform import Transform
+from ..constants import PI
+from ..utils.paths import spiral_path
+
+if TYPE_CHECKING:
+ from manim.mobject.geometry.line import Arrow
+ from manim.mobject.opengl.opengl_mobject import OpenGLMobject
+ from manim.typing import Point3DLike, Vector3DLike
+ from manim.utils.color import ParsableManimColor
+
+ from ..mobject.mobject import Mobject
+
+
+[docs]
+class GrowFromPoint(Transform):
+ """Introduce an :class:`~.Mobject` by growing it from a point.
+
+ Parameters
+ ----------
+ mobject
+ The mobjects to be introduced.
+ point
+ The point from which the mobject grows.
+ point_color
+ Initial color of the mobject before growing to its full size. Leave empty to match mobject's color.
+
+ Examples
+ --------
+
+ .. manim :: GrowFromPointExample
+
+ class GrowFromPointExample(Scene):
+ def construct(self):
+ dot = Dot(3 * UR, color=GREEN)
+ squares = [Square() for _ in range(4)]
+ VGroup(*squares).set_x(0).arrange(buff=1)
+ self.add(dot)
+ self.play(GrowFromPoint(squares[0], ORIGIN))
+ self.play(GrowFromPoint(squares[1], [-2, 2, 0]))
+ self.play(GrowFromPoint(squares[2], [3, -2, 0], RED))
+ self.play(GrowFromPoint(squares[3], dot, dot.get_color()))
+
+ """
+
+ def __init__(
+ self,
+ mobject: Mobject,
+ point: Point3DLike,
+ point_color: ParsableManimColor | None = None,
+ **kwargs: Any,
+ ):
+ self.point = point
+ self.point_color = point_color
+ super().__init__(mobject, introducer=True, **kwargs)
+
+ def create_target(self) -> Mobject | OpenGLMobject:
+ return self.mobject
+
+ def create_starting_mobject(self) -> Mobject | OpenGLMobject:
+ start = super().create_starting_mobject()
+ start.scale(0)
+ start.move_to(self.point)
+ if self.point_color:
+ start.set_color(self.point_color)
+ return start
+
+
+============================================================
+MODULE: manim.animation.composition
+============================================================
+"""Tools for displaying multiple animations at once."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+from manim._config import config
+from manim.animation.animation import Animation, prepare_animation
+from manim.constants import RendererType
+from manim.mobject.mobject import Group, Mobject
+from manim.mobject.opengl.opengl_mobject import OpenGLGroup, OpenGLMobject
+from manim.scene.scene import Scene
+from manim.utils.iterables import remove_list_redundancies
+from manim.utils.parameter_parsing import flatten_iterable_parameters
+from manim.utils.rate_functions import linear
+
+if TYPE_CHECKING:
+ from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVGroup
+ from manim.mobject.types.vectorized_mobject import VGroup
+
+__all__ = ["AnimationGroup", "Succession", "LaggedStart", "LaggedStartMap"]
+
+
+DEFAULT_LAGGED_START_LAG_RATIO: float = 0.05
+
+
+[docs]
+class AnimationGroup(Animation):
+ """Plays a group or series of :class:`~.Animation`.
+
+ Parameters
+ ----------
+ animations
+ Sequence of :class:`~.Animation` objects to be played.
+ group
+ A group of multiple :class:`~.Mobject`.
+ run_time
+ The duration of the animation in seconds.
+ rate_func
+ The function defining the animation progress based on the relative
+ runtime (see :mod:`~.rate_functions`) .
+ lag_ratio
+ Defines the delay after which the animation is applied to submobjects. A lag_ratio of
+ ``n.nn`` means the next animation will play when ``nnn%`` of the current animation has played.
+ Defaults to 0.0, meaning that all animations will be played together.
+
+ This does not influence the total runtime of the animation. Instead the runtime
+ of individual animations is adjusted so that the complete animation has the defined
+ run time.
+ """
+
+ def __init__(
+ self,
+ *animations: Animation | Iterable[Animation],
+ group: Group | VGroup | OpenGLGroup | OpenGLVGroup | None = None,
+ run_time: float | None = None,
+ rate_func: Callable[[float], float] = linear,
+ lag_ratio: float = 0,
+ **kwargs: Any,
+ ):
+ arg_anim = flatten_iterable_parameters(animations)
+ self.animations = [prepare_animation(anim) for anim in arg_anim]
+ self.rate_func = rate_func
+ if group is None:
+ mobjects = remove_list_redundancies(
+ [anim.mobject for anim in self.animations if not anim.is_introducer()],
+ )
+ if config["renderer"] == RendererType.OPENGL:
+ self.group: Group | VGroup | OpenGLGroup | OpenGLVGroup = OpenGLGroup(
+ *mobjects
+ )
+ else:
+ self.group = Group(*mobjects)
+ else:
+ self.group = group
+ super().__init__(
+ self.group, rate_func=self.rate_func, lag_ratio=lag_ratio, **kwargs
+ )
+ self.run_time: float = self.init_run_time(run_time)
+
+
+[docs]
+ def get_all_mobjects(self) -> Sequence[Mobject | OpenGLMobject]:
+ return list(self.group)
+
+
+============================================================
+MODULE: manim.animation.rotation
+============================================================
+"""Animations related to rotation."""
+
+from __future__ import annotations
+
+__all__ = ["Rotating", "Rotate"]
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+from ..animation.animation import Animation
+from ..animation.transform import Transform
+from ..constants import OUT, PI, TAU
+from ..utils.rate_functions import linear
+
+if TYPE_CHECKING:
+ from ..mobject.mobject import Mobject
+ from ..mobject.opengl.opengl_mobject import OpenGLMobject
+ from ..typing import Point3DLike, Vector3DLike
+
+
+[docs]
+class Rotating(Animation):
+ """Animation that rotates a Mobject.
+
+ Parameters
+ ----------
+ mobject
+ The mobject to be rotated.
+ angle
+ The rotation angle in radians. Predefined constants such as ``DEGREES``
+ can also be used to specify the angle in degrees.
+ axis
+ The rotation axis as a numpy vector.
+ about_point
+ The rotation center.
+ about_edge
+ If ``about_point`` is ``None``, this argument specifies
+ the direction of the bounding box point to be taken as
+ the rotation center.
+ run_time
+ The duration of the animation in seconds.
+ rate_func
+ The function defining the animation progress based on the relative
+ runtime (see :mod:`~.rate_functions`) .
+ **kwargs
+ Additional keyword arguments passed to :class:`~.Animation`.
+
+ Examples
+ --------
+ .. manim:: RotatingDemo
+
+ class RotatingDemo(Scene):
+ def construct(self):
+ circle = Circle(radius=1, color=BLUE)
+ line = Line(start=ORIGIN, end=RIGHT)
+ arrow = Arrow(start=ORIGIN, end=RIGHT, buff=0, color=GOLD)
+ vg = VGroup(circle,line,arrow)
+ self.add(vg)
+ anim_kw = {"about_point": arrow.get_start(), "run_time": 1}
+ self.play(Rotating(arrow, 180*DEGREES, **anim_kw))
+ self.play(Rotating(arrow, PI, **anim_kw))
+ self.play(Rotating(vg, PI, about_point=RIGHT))
+ self.play(Rotating(vg, PI, axis=UP, about_point=ORIGIN))
+ self.play(Rotating(vg, PI, axis=RIGHT, about_edge=UP))
+ self.play(vg.animate.move_to(ORIGIN))
+
+ .. manim:: RotatingDifferentAxis
+
+ class RotatingDifferentAxis(ThreeDScene):
+ def construct(self):
+ axes = ThreeDAxes()
+ cube = Cube()
+ arrow2d = Arrow(start=[0, -1.2, 1], end=[0, 1.2, 1], color=YELLOW_E)
+ cube_group = VGroup(cube,arrow2d)
+ self.set_camera_orientation(gamma=0, phi=40*DEGREES, theta=40*DEGREES)
+ self.add(axes, cube_group)
+ play_kw = {"run_time": 1.5}
+ self.play(Rotating(cube_group, PI), **play_kw)
+ self.play(Rotating(cube_group, PI, axis=UP), **play_kw)
+ self.play(Rotating(cube_group, 180*DEGREES, axis=RIGHT), **play_kw)
+ self.wait(0.5)
+
+ See also
+ --------
+ :class:`~.Rotate`, :meth:`~.Mobject.rotate`
+
+ """
+
+ def __init__(
+ self,
+ mobject: Mobject,
+ angle: float = TAU,
+ axis: Vector3DLike = OUT,
+ about_point: Point3DLike | None = None,
+ about_edge: Vector3DLike | None = None,
+ run_time: float = 5,
+ rate_func: Callable[[float], float] = linear,
+ **kwargs: Any,
+ ) -> None:
+ self.angle = angle
+ self.axis = axis
+ self.about_point = about_point
+ self.about_edge = about_edge
+ super().__init__(mobject, run_time=run_time, rate_func=rate_func, **kwargs)
+
+
+[docs]
+ def interpolate_mobject(self, alpha: float) -> None:
+ self.mobject.become(self.starting_mobject)
+ self.mobject.rotate(
+ self.rate_func(alpha) * self.angle,
+ axis=self.axis,
+ about_point=self.about_point,
+ about_edge=self.about_edge,
+ )
+
+
+============================================================
+MODULE: manim.mobject.geometry.arc
+============================================================
+r"""Mobjects that are curved.
+
+Examples
+--------
+.. manim:: UsefulAnnotations
+ :save_last_frame:
+
+ class UsefulAnnotations(Scene):
+ def construct(self):
+ m0 = Dot()
+ m1 = AnnotationDot()
+ m2 = LabeledDot("ii")
+ m3 = LabeledDot(MathTex(r"\alpha").set_color(ORANGE))
+ m4 = CurvedArrow(2*LEFT, 2*RIGHT, radius= -5)
+ m5 = CurvedArrow(2*LEFT, 2*RIGHT, radius= 8)
+ m6 = CurvedDoubleArrow(ORIGIN, 2*RIGHT)
+
+ self.add(m0, m1, m2, m3, m4, m5, m6)
+ for i, mobj in enumerate(self.mobjects):
+ mobj.shift(DOWN * (i-3))
+
+"""
+
+from __future__ import annotations
+
+__all__ = [
+ "TipableVMobject",
+ "Arc",
+ "ArcBetweenPoints",
+ "CurvedArrow",
+ "CurvedDoubleArrow",
+ "Circle",
+ "Dot",
+ "AnnotationDot",
+ "LabeledDot",
+ "Ellipse",
+ "AnnularSector",
+ "Sector",
+ "Annulus",
+ "CubicBezier",
+ "ArcPolygon",
+ "ArcPolygonFromArcs",
+ "TangentialArc",
+]
+
+import itertools
+import warnings
+from typing import TYPE_CHECKING, Any, Self, cast
+
+import numpy as np
+
+from manim.constants import *
+from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+from manim.mobject.types.vectorized_mobject import VGroup, VMobject
+from manim.utils.color import BLACK, BLUE, RED, WHITE, ParsableManimColor
+from manim.utils.iterables import adjacent_pairs
+from manim.utils.space_ops import (
+ angle_between_vectors,
+ angle_of_vector,
+ cartesian_to_spherical,
+ line_intersection,
+ perpendicular_bisector,
+ rotate_vector,
+)
+
+if TYPE_CHECKING:
+ from collections.abc import Iterable
+
+ import manim.mobject.geometry.tips as tips
+ from manim.mobject.geometry.line import Line
+ from manim.mobject.mobject import Mobject
+ from manim.mobject.text.tex_mobject import SingleStringMathTex, Tex
+ from manim.mobject.text.text_mobject import Text
+ from manim.typing import (
+ Point3D,
+ Point3DLike,
+ QuadraticSpline,
+ Vector3DLike,
+ )
+
+
+[docs]
+class TipableVMobject(VMobject, metaclass=ConvertToOpenGL):
+ """Meant for shared functionality between Arc and Line.
+ Functionality can be classified broadly into these groups:
+
+ * Adding, Creating, Modifying tips
+ - add_tip calls create_tip, before pushing the new tip
+ into the TipableVMobject's list of submobjects
+ - stylistic and positional configuration
+
+ * Checking for tips
+ - Boolean checks for whether the TipableVMobject has a tip
+ and a starting tip
+
+ * Getters
+ - Straightforward accessors, returning information pertaining
+ to the TipableVMobject instance's tip(s), its length etc
+ """
+
+ def __init__(
+ self,
+ tip_length: float = DEFAULT_ARROW_TIP_LENGTH,
+ normal_vector: Vector3DLike = OUT,
+ tip_style: dict | None = None,
+ **kwargs: Any,
+ ) -> None:
+ self.tip_length: float = tip_length
+ self.normal_vector = normal_vector
+ self.tip_style: dict = tip_style if tip_style is not None else {}
+ super().__init__(**kwargs)
+
+ # Adding, Creating, Modifying tips
+
+
+[docs]
+ def add_tip(
+ self,
+ tip: tips.ArrowTip | None = None,
+ tip_shape: type[tips.ArrowTip] | None = None,
+ tip_length: float | None = None,
+ tip_width: float | None = None,
+ at_start: bool = False,
+ ) -> Self:
+ """Adds a tip to the TipableVMobject instance, recognising
+ that the endpoints might need to be switched if it's
+ a 'starting tip' or not.
+ """
+ if tip is None:
+ tip = self.create_tip(tip_shape, tip_length, tip_width, at_start)
+ else:
+ self.position_tip(tip, at_start)
+ self.reset_endpoints_based_on_tip(tip, at_start)
+ self.assign_tip_attr(tip, at_start)
+ self.add(tip)
+ return self
+
+
+============================================================
+MODULE: manim.mobject.geometry.line
+============================================================
+r"""Mobjects that are lines or variations of them."""
+
+from __future__ import annotations
+
+__all__ = [
+ "Line",
+ "DashedLine",
+ "TangentLine",
+ "Elbow",
+ "Arrow",
+ "Vector",
+ "DoubleArrow",
+ "Angle",
+ "RightAngle",
+]
+
+from typing import TYPE_CHECKING, Any, Literal
+
+import numpy as np
+
+from manim import config
+from manim.constants import *
+from manim.mobject.geometry.arc import Arc, ArcBetweenPoints, Dot, TipableVMobject
+from manim.mobject.geometry.tips import ArrowTriangleFilledTip
+from manim.mobject.mobject import Mobject
+from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+from manim.mobject.opengl.opengl_mobject import OpenGLMobject
+from manim.mobject.types.vectorized_mobject import DashedVMobject, VGroup, VMobject
+from manim.utils.color import WHITE
+from manim.utils.space_ops import angle_of_vector, line_intersection, normalize
+
+if TYPE_CHECKING:
+ from typing import Self, TypeAlias
+
+ from manim.typing import Point3D, Point3DLike, Vector2DLike, Vector3D, Vector3DLike
+ from manim.utils.color import ParsableManimColor
+
+ from ..matrix import Matrix # Avoid circular import
+
+ AngleQuadrant: TypeAlias = tuple[Literal[-1, 1], Literal[-1, 1]]
+ r"""A tuple of 2 integers which can be either +1 or -1, allowing to select
+ one of the 4 quadrants of the Cartesian plane.
+
+ Let :math:`L_1,\ L_2` be two lines defined by start points
+ :math:`S_1,\ S_2` and end points :math:`E_1,\ E_2`. We define the "positive
+ direction" of :math:`L_1` as the direction from :math:`S_1` to :math:`E_1`,
+ and its "negative direction" as the opposite one. We do the same with
+ :math:`L_2`.
+
+ If :math:`L_1` and :math:`L_2` intersect, they divide the plane into 4
+ quadrants. To pick one quadrant, choose the integers in this tuple in the
+ following way:
+
+ - If the 1st integer is +1, select one of the 2 quadrants towards the
+ positive direction of :math:`L_1`, i.e. closest to `E_1`. Otherwise, if
+ the 1st integer is -1, select one of the 2 quadrants towards the
+ negative direction of :math:`L_1`, i.e. closest to `S_1`.
+
+ - Similarly, the sign of the 2nd integer picks the positive or negative
+ direction of :math:`L_2` and, thus, selects one of the 2 quadrants
+ which are closest to :math:`E_2` or :math:`S_2` respectively.
+ """
+
+
+[docs]
+class Line(TipableVMobject):
+ """A straight or curved line segment between two points or mobjects.
+
+ Parameters
+ ----------
+ start
+ The starting point or Mobject of the line.
+ end
+ The ending point or Mobject of the line.
+ buff
+ The distance to shorten the line from both ends.
+ path_arc
+ If nonzero, the line will be curved into an arc with this angle (in radians).
+ kwargs
+ Additional arguments to be passed to :class:`TipableVMobject`
+
+ Examples
+ --------
+ .. manim:: LineExample
+ :save_last_frame:
+
+ class LineExample(Scene):
+ def construct(self):
+ line1 = Line(LEFT*2, RIGHT*2)
+ line2 = Line(LEFT*2, RIGHT*2, buff=0.5)
+ line3 = Line(LEFT*2, RIGHT*2, path_arc=PI/2)
+ grp = VGroup(line1,line2,line3).arrange(DOWN, buff=2)
+ self.add(grp)
+ """
+
+ def __init__(
+ self,
+ start: Point3DLike | Mobject = LEFT,
+ end: Point3DLike | Mobject = RIGHT,
+ buff: float = 0,
+ path_arc: float = 0,
+ **kwargs: Any,
+ ) -> None:
+ self.dim = 3
+ self.buff = buff
+ self.path_arc = path_arc
+ self._set_start_and_end_attrs(start, end)
+ super().__init__(**kwargs)
+
+
+[docs]
+ def generate_points(self) -> None:
+ self.set_points_by_ends(
+ start=self.start,
+ end=self.end,
+ buff=self.buff,
+ path_arc=self.path_arc,
+ )
+
+
+============================================================
+MODULE: manim.mobject.geometry.polygram
+============================================================
+r"""Mobjects that are simple geometric shapes."""
+
+from __future__ import annotations
+
+__all__ = [
+ "Polygram",
+ "Polygon",
+ "RegularPolygram",
+ "RegularPolygon",
+ "Star",
+ "Triangle",
+ "Rectangle",
+ "Square",
+ "RoundedRectangle",
+ "Cutout",
+ "ConvexHull",
+]
+
+
+from math import ceil
+from typing import TYPE_CHECKING, Any, Literal
+
+import numpy as np
+
+from manim.constants import *
+from manim.mobject.geometry.arc import ArcBetweenPoints
+from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+from manim.mobject.types.vectorized_mobject import VGroup, VMobject
+from manim.utils.color import BLUE, WHITE, ParsableManimColor
+from manim.utils.iterables import adjacent_n_tuples, adjacent_pairs
+from manim.utils.qhull import QuickHull
+from manim.utils.space_ops import angle_between_vectors, normalize, regular_vertices
+
+if TYPE_CHECKING:
+ from typing import Self
+
+ import numpy.typing as npt
+
+ from manim.typing import (
+ Point3D,
+ Point3D_Array,
+ Point3DLike,
+ Point3DLike_Array,
+ )
+ from manim.utils.color import ParsableManimColor
+
+
+[docs]
+class Polygram(VMobject, metaclass=ConvertToOpenGL):
+ """A generalized :class:`Polygon`, allowing for disconnected sets of edges.
+
+ Parameters
+ ----------
+ vertex_groups
+ The groups of vertices making up the :class:`Polygram`.
+
+ The first vertex in each group is repeated to close the shape.
+ Each point must be 3-dimensional: ``[x,y,z]``
+ color
+ The color of the :class:`Polygram`.
+ kwargs
+ Forwarded to the parent constructor.
+
+ Examples
+ --------
+ .. manim:: PolygramExample
+
+ import numpy as np
+
+ class PolygramExample(Scene):
+ def construct(self):
+ hexagram = Polygram(
+ [[0, 2, 0], [-np.sqrt(3), -1, 0], [np.sqrt(3), -1, 0]],
+ [[-np.sqrt(3), 1, 0], [0, -2, 0], [np.sqrt(3), 1, 0]],
+ )
+ self.add(hexagram)
+
+ dot = Dot()
+ self.play(MoveAlongPath(dot, hexagram), run_time=5, rate_func=linear)
+ self.remove(dot)
+ self.wait()
+ """
+
+ def __init__(
+ self,
+ *vertex_groups: Point3DLike_Array,
+ color: ParsableManimColor = BLUE,
+ **kwargs: Any,
+ ):
+ super().__init__(color=color, **kwargs)
+
+ for vertices in vertex_groups:
+ # The inferred type for *vertices is Any, but it should be
+ # Point3D_Array
+ first_vertex, *vertices = vertices
+ first_vertex = np.array(first_vertex)
+
+ self.start_new_path(first_vertex)
+ self.add_points_as_corners(
+ [*(np.array(vertex) for vertex in vertices), first_vertex],
+ )
+
+
+[docs]
+ def get_vertices(self) -> Point3D_Array:
+ """Gets the vertices of the :class:`Polygram`.
+
+ Returns
+ -------
+ :class:`numpy.ndarray`
+ The vertices of the :class:`Polygram`.
+
+ Examples
+ --------
+ ::
+
+ >>> sq = Square()
+ >>> sq.get_vertices()
+ array([[ 1., 1., 0.],
+ [-1., 1., 0.],
+ [-1., -1., 0.],
+ [ 1., -1., 0.]])
+ """
+ return self.get_start_anchors()
+
+
+============================================================
+MODULE: manim.mobject.text.text_mobject
+============================================================
+"""Mobjects used for displaying (non-LaTeX) text.
+
+.. note::
+ Just as you can use :class:`~.Tex` and :class:`~.MathTex` (from the module :mod:`~.tex_mobject`)
+ to insert LaTeX to your videos, you can use :class:`~.Text` to to add normal text.
+
+.. important::
+
+ See the corresponding tutorial :ref:`using-text-objects`, especially for information about fonts.
+
+
+The simplest way to add text to your animations is to use the :class:`~.Text` class. It uses the Pango library to render text.
+With Pango, you are also able to render non-English alphabets like `你好` or `こんにちは` or `안녕하세요` or `مرحبا بالعالم`.
+
+Examples
+--------
+
+.. manim:: HelloWorld
+ :save_last_frame:
+
+ class HelloWorld(Scene):
+ def construct(self):
+ text = Text('Hello world').scale(3)
+ self.add(text)
+
+.. manim:: TextAlignment
+ :save_last_frame:
+
+ class TextAlignment(Scene):
+ def construct(self):
+ title = Text("K-means clustering and Logistic Regression", color=WHITE)
+ title.scale(0.75)
+ self.add(title.to_edge(UP))
+
+ t1 = Text("1. Measuring").set_color(WHITE)
+
+ t2 = Text("2. Clustering").set_color(WHITE)
+
+ t3 = Text("3. Regression").set_color(WHITE)
+
+ t4 = Text("4. Prediction").set_color(WHITE)
+
+ x = VGroup(t1, t2, t3, t4).arrange(direction=DOWN, aligned_edge=LEFT).scale(0.7).next_to(ORIGIN,DR)
+ x.set_opacity(0.5)
+ x.submobjects[1].set_opacity(1)
+ self.add(x)
+
+"""
+
+from __future__ import annotations
+
+import functools
+
+__all__ = ["Text", "Paragraph", "MarkupText", "register_font"]
+
+
+import copy
+import hashlib
+import re
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from itertools import chain
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import manimpango
+import numpy as np
+from manimpango import MarkupUtils, PangoUtils, TextSetting
+
+from manim import config, logger
+from manim.constants import *
+from manim.mobject.geometry.arc import Dot
+from manim.mobject.svg.svg_mobject import SVGMobject
+from manim.mobject.types.vectorized_mobject import VGroup, VMobject
+from manim.typing import Point3D
+from manim.utils.color import ManimColor, ParsableManimColor, color_gradient
+
+if TYPE_CHECKING:
+ from typing import Self
+
+ from manim.typing import Point3D
+
+TEXT_MOB_SCALE_FACTOR = 0.05
+DEFAULT_LINE_SPACING_SCALE = 0.3
+TEXT2SVG_ADJUSTMENT_FACTOR = 4.8
+
+__all__ = ["Text", "Paragraph", "MarkupText", "register_font"]
+
+
+[docs]
+def remove_invisible_chars(mobject: VMobject) -> VMobject:
+ """Function to remove unwanted invisible characters from some mobjects.
+
+ Parameters
+ ----------
+ mobject
+ Any SVGMobject from which we want to remove unwanted invisible characters.
+
+ Returns
+ -------
+ :class:`~.SVGMobject`
+ The SVGMobject without unwanted invisible characters.
+ """
+ mobject_without_dots = VGroup()
+ if isinstance(mobject[0], VGroup):
+ for submob in mobject:
+ mobject_without_dots.add(
+ VGroup(k for k in submob if not isinstance(k, Dot))
+ )
+ else:
+ mobject_without_dots.add(*(k for k in mobject if not isinstance(k, Dot)))
+ return mobject_without_dots
+
+
+============================================================
+MODULE: manim.mobject.text.tex_mobject
+============================================================
+r"""Mobjects representing text rendered using LaTeX.
+
+.. important::
+
+ See the corresponding tutorial :ref:`rendering-with-latex`
+
+.. note::
+
+ Just as you can use :class:`~.Text` (from the module :mod:`~.text_mobject`) to add text to your videos, you can use :class:`~.Tex` and :class:`~.MathTex` to insert LaTeX.
+
+"""
+
+from __future__ import annotations
+
+from manim.utils.color import BLACK, ParsableManimColor
+
+__all__ = [
+ "SingleStringMathTex",
+ "MathTex",
+ "Tex",
+ "BulletedList",
+ "Title",
+]
+
+
+import operator as op
+import re
+from collections.abc import Iterable
+from functools import reduce
+from textwrap import dedent
+from typing import Any, Self
+
+from manim import config, logger
+from manim.constants import *
+from manim.mobject.geometry.line import Line
+from manim.mobject.svg.svg_mobject import SVGMobject
+from manim.mobject.types.vectorized_mobject import VGroup, VMobject
+from manim.utils.tex import TexTemplate
+from manim.utils.tex_file_writing import tex_to_svg_file
+
+from ..opengl.opengl_compatibility import ConvertToOpenGL
+
+MATHTEX_SUBSTRING = "substring"
+
+
+[docs]
+class SingleStringMathTex(SVGMobject):
+ """Elementary building block for rendering text with LaTeX.
+
+ Tests
+ -----
+ Check that creating a :class:`~.SingleStringMathTex` object works::
+
+ >>> SingleStringMathTex('Test') # doctest: +SKIP
+ SingleStringMathTex('Test')
+ """
+
+ def __init__(
+ self,
+ tex_string: str,
+ stroke_width: float = 0,
+ should_center: bool = True,
+ height: float | None = None,
+ organize_left_to_right: bool = False,
+ tex_environment: str | None = "align*",
+ tex_template: TexTemplate | None = None,
+ font_size: float = DEFAULT_FONT_SIZE,
+ color: ParsableManimColor | None = None,
+ **kwargs: Any,
+ ):
+ if color is None:
+ color = VMobject().color
+
+ self._font_size = font_size
+ self.organize_left_to_right = organize_left_to_right
+ self.tex_environment = tex_environment
+ if tex_template is None:
+ tex_template = config["tex_template"]
+ self.tex_template: TexTemplate = tex_template
+
+ self.tex_string = tex_string
+ file_name = tex_to_svg_file(
+ self._get_modified_expression(tex_string),
+ environment=self.tex_environment,
+ tex_template=self.tex_template,
+ )
+ super().__init__(
+ file_name=file_name,
+ should_center=should_center,
+ stroke_width=stroke_width,
+ height=height,
+ color=color,
+ path_string_config={
+ "should_subdivide_sharp_curves": True,
+ "should_remove_null_curves": True,
+ },
+ **kwargs,
+ )
+ self.init_colors()
+
+ # used for scaling via font_size.setter
+ self.initial_height = self.height
+
+ if height is None:
+ self.font_size = self._font_size
+
+ if self.organize_left_to_right:
+ self._organize_submobjects_left_to_right()
+
+ def __repr__(self) -> str:
+ return f"{type(self).__name__}({repr(self.tex_string)})"
+
+ @property
+ def font_size(self) -> float:
+ """The font size of the tex mobject."""
+ return self.height / self.initial_height / SCALE_FACTOR_PER_FONT_POINT
+
+ @font_size.setter
+ def font_size(self, font_val: float) -> None:
+ if font_val <= 0:
+ raise ValueError("font_size must be greater than 0.")
+ elif self.height > 0:
+ # sometimes manim generates a SingleStringMathex mobject with 0 height.
+ # can't be scaled regardless and will error without the elif.
+
+ # scale to a factor of the initial height so that setting
+ # font_size does not depend on current size.
+ self.scale(font_val / self.font_size)
+
+ def _get_modified_expression(self, tex_string: str) -> str:
+ result = tex_string
+ result = result.strip()
+ result = self._modify_special_strings(result)
+ return result
+
+ def _modify_special_strings(self, tex: str) -> str:
+ tex = tex.strip()
+ should_add_filler = reduce(
+ op.or_,
+ [
+ # Fraction line needs something to be over
+ tex == "\\over",
+ tex == "\\overline",
+ # Make sure sqrt has overbar
+ tex == "\\sqrt",
+ tex == "\\sqrt{",
+ # Need to add blank subscript or superscript
+ tex.endswith("_"),
+ tex.endswith("^"),
+ tex.endswith("dot"),
+ ],
+ )
+
+ if should_add_filler:
+ filler = "{\\quad}"
+ tex += filler
+
+ if tex == "\\substack":
+ tex = "\\quad"
+
+ if tex == "":
+ tex = "\\quad"
+
+ # To keep files from starting with a line break
+ if tex.startswith("\\\\"):
+ tex = tex.replace("\\\\", "\\quad\\\\")
+
+ # Handle imbalanced \left and \right
+ num_lefts, num_rights = (
+ len([s for s in tex.split(substr)[1:] if s and s[0] in "(){}[]|.\\"])
+ for substr in ("\\left", "\\right")
+ )
+ if num_lefts != num_rights:
+ tex = tex.replace("\\left", "\\big")
+ tex = tex.replace("\\right", "\\big")
+
+ tex = self._remove_stray_braces(tex)
+
+ for context in ["array"]:
+ begin_in = ("\\begin{%s}" % context) in tex # noqa: UP031
+ end_in = ("\\end{%s}" % context) in tex # noqa: UP031
+ if begin_in ^ end_in:
+ # Just turn this into a blank string,
+ # which means caller should leave a
+ # stray \\begin{...} with other symbols
+ tex = ""
+ return tex
+
+
+[docs]
+ def _remove_stray_braces(self, tex: str) -> str:
+ r"""
+ Makes :class:`~.MathTex` resilient to unmatched braces.
+
+ This is important when the braces in the TeX code are spread over
+ multiple arguments as in, e.g., ``MathTex(r"e^{i", r"\tau} = 1")``.
+ """
+ # "\{" does not count (it's a brace literal), but "\\{" counts (it's a new line and then brace)
+ num_lefts = tex.count("{") - tex.count("\\{") + tex.count("\\\\{")
+ num_rights = tex.count("}") - tex.count("\\}") + tex.count("\\\\}")
+ while num_rights > num_lefts:
+ tex = "{" + tex
+ num_lefts += 1
+ while num_lefts > num_rights:
+ tex = tex + "}"
+ num_rights += 1
+ return tex
+
+
+============================================================
+MODULE: manim.mobject.graphing.coordinate_systems
+============================================================
+"""Mobjects that represent coordinate systems."""
+
+from __future__ import annotations
+
+__all__ = [
+ "CoordinateSystem",
+ "Axes",
+ "ThreeDAxes",
+ "NumberPlane",
+ "PolarPlane",
+ "ComplexPlane",
+]
+
+import fractions as fr
+import numbers
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Self, TypeVar, overload
+
+import numpy as np
+
+from manim import config
+from manim.constants import *
+from manim.mobject.geometry.arc import Circle, Dot
+from manim.mobject.geometry.line import Arrow, DashedLine, Line
+from manim.mobject.geometry.polygram import Polygon, Rectangle, RegularPolygon
+from manim.mobject.graphing.functions import ImplicitFunction, ParametricFunction
+from manim.mobject.graphing.number_line import NumberLine
+from manim.mobject.graphing.scale import LinearBase
+from manim.mobject.mobject import Mobject
+from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+from manim.mobject.opengl.opengl_surface import OpenGLSurface
+from manim.mobject.text.tex_mobject import MathTex
+from manim.mobject.three_d.three_dimensions import Surface
+from manim.mobject.types.vectorized_mobject import (
+ VDict,
+ VectorizedPoint,
+ VGroup,
+ VMobject,
+)
+from manim.utils.color import (
+ BLACK,
+ BLUE,
+ BLUE_D,
+ GREEN,
+ PURE_YELLOW,
+ WHITE,
+ ManimColor,
+ ParsableManimColor,
+ color_gradient,
+ interpolate_color,
+ invert_color,
+)
+from manim.utils.config_ops import merge_dicts_recursively, update_dict_recursively
+from manim.utils.simple_functions import binary_search
+from manim.utils.space_ops import angle_of_vector
+
+if TYPE_CHECKING:
+ from manim.mobject.mobject import Mobject
+ from manim.typing import (
+ ManimFloat,
+ Point2D,
+ Point2DLike,
+ Point3D,
+ Point3DLike,
+ Vector3D,
+ Vector3DLike,
+ )
+
+ LineType = TypeVar("LineType", bound=Line)
+
+
+[docs]
+class CoordinateSystem:
+ r"""Abstract base class for Axes and NumberPlane.
+
+ Examples
+ --------
+ .. manim:: CoordSysExample
+ :save_last_frame:
+
+ class CoordSysExample(Scene):
+ def construct(self):
+ # the location of the ticks depends on the x_range and y_range.
+ grid = Axes(
+ x_range=[0, 1, 0.05], # step size determines num_decimal_places.
+ y_range=[0, 1, 0.05],
+ x_length=9,
+ y_length=5.5,
+ axis_config={
+ "numbers_to_include": np.arange(0, 1 + 0.1, 0.1),
+ "font_size": 24,
+ },
+ tips=False,
+ )
+
+ # Labels for the x-axis and y-axis.
+ y_label = grid.get_y_axis_label("y", edge=LEFT, direction=LEFT, buff=0.4)
+ x_label = grid.get_x_axis_label("x")
+ grid_labels = VGroup(x_label, y_label)
+
+ graphs = VGroup()
+ for n in np.arange(1, 20 + 0.5, 0.5):
+ graphs += grid.plot(lambda x: x ** n, color=WHITE)
+ graphs += grid.plot(
+ lambda x: x ** (1 / n), color=WHITE, use_smoothing=False
+ )
+
+ # Extra lines and labels for point (1,1)
+ graphs += grid.get_horizontal_line(grid @ (1, 1, 0), color=BLUE)
+ graphs += grid.get_vertical_line(grid @ (1, 1, 0), color=BLUE)
+ graphs += Dot(point=grid @ (1, 1, 0), color=YELLOW)
+ graphs += Tex("(1,1)").scale(0.75).next_to(grid @ (1, 1, 0))
+ title = Title(
+ # spaces between braces to prevent SyntaxError
+ r"Graphs of $y=x^{ {1}\over{n} }$ and $y=x^n (n=1,2,3,...,20)$",
+ include_underline=False,
+ font_size=40,
+ )
+
+ self.add(title, graphs, grid, grid_labels)
+ """
+
+ def __init__(
+ self,
+ x_range: Sequence[float] | None = None,
+ y_range: Sequence[float] | None = None,
+ x_length: float | None = None,
+ y_length: float | None = None,
+ dimension: int = 2,
+ ):
+ self.dimension = dimension
+
+ default_step = 1
+ if x_range is None:
+ x_range = [
+ round(-config["frame_x_radius"]),
+ round(config["frame_x_radius"]),
+ default_step,
+ ]
+ elif len(x_range) == 2:
+ x_range = [*x_range, default_step]
+
+ if y_range is None:
+ y_range = [
+ round(-config["frame_y_radius"]),
+ round(config["frame_y_radius"]),
+ default_step,
+ ]
+ elif len(y_range) == 2:
+ y_range = [*y_range, default_step]
+
+ self.x_range = x_range
+ self.y_range = y_range
+ self.x_length = x_length
+ self.y_length = y_length
+ self.num_sampled_graph_points_per_tick = 10
+ self.x_axis: NumberLine
+
+ def coords_to_point(self, *coords: ManimFloat) -> Point3D:
+ # TODO: I think the method should be able to return more than just a single point.
+ # E.g. see the implementation of it on line 2065.
+ raise NotImplementedError()
+
+ def point_to_coords(self, point: Point3DLike) -> list[ManimFloat]:
+ raise NotImplementedError()
+
+
+[docs]
+ def polar_to_point(self, radius: float, azimuth: float) -> Point2D:
+ r"""Gets a point from polar coordinates.
+
+ Parameters
+ ----------
+ radius
+ The coordinate radius (:math:`r`).
+
+ azimuth
+ The coordinate azimuth (:math:`\theta`).
+
+ Returns
+ -------
+ numpy.ndarray
+ The point.
+
+ Examples
+ --------
+ .. manim:: PolarToPointExample
+ :ref_classes: PolarPlane Vector
+ :save_last_frame:
+
+ class PolarToPointExample(Scene):
+ def construct(self):
+ polarplane_pi = PolarPlane(azimuth_units="PI radians", size=6)
+ polartopoint_vector = Vector(polarplane_pi.polar_to_point(3, PI/4))
+ self.add(polarplane_pi)
+ self.add(polartopoint_vector)
+ """
+ return self.coords_to_point(radius * np.cos(azimuth), radius * np.sin(azimuth))
+
+
+============================================================
+MODULE: manim.mobject.types.vectorized_mobject
+============================================================
+"""Mobjects that use vector graphics."""
+
+from __future__ import annotations
+
+__all__ = [
+ "VMobject",
+ "VGroup",
+ "VDict",
+ "VectorizedPoint",
+ "CurvesAsSubmobjects",
+ "DashedVMobject",
+]
+
+import itertools as it
+import sys
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal
+
+import numpy as np
+from PIL.Image import Image
+
+from manim import config
+from manim.constants import *
+from manim.mobject.mobject import Mobject
+from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+from manim.mobject.opengl.opengl_mobject import OpenGLMobject
+from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
+from manim.mobject.three_d.three_d_utils import (
+ get_3d_vmob_gradient_start_and_end_points,
+)
+from manim.utils.bezier import (
+ bezier,
+ bezier_remap,
+ get_smooth_cubic_bezier_handle_points,
+ integer_interpolate,
+ interpolate,
+ partial_bezier_points,
+ proportions_along_bezier_curve_for_point,
+)
+from manim.utils.color import BLACK, WHITE, ManimColor, ParsableManimColor
+from manim.utils.iterables import (
+ make_even,
+ resize_array,
+ stretch_array_to_length,
+ tuplify,
+)
+from manim.utils.space_ops import rotate_vector, shoelace_direction
+
+if TYPE_CHECKING:
+ from typing import Self
+
+ import numpy.typing as npt
+
+ from manim.typing import (
+ CubicBezierPath,
+ CubicBezierPointsLike,
+ CubicSpline,
+ FloatRGBA,
+ FloatRGBA_Array,
+ ManimFloat,
+ MappingFunction,
+ Point2DLike,
+ Point3D,
+ Point3D_Array,
+ Point3DLike,
+ Point3DLike_Array,
+ Vector3D,
+ Vector3DLike,
+ )
+
+# TODO
+# - Change cubic curve groups to have 4 points instead of 3
+# - Change sub_path idea accordingly
+# - No more mark_paths_closed, instead have the camera test
+# if last point in close to first point
+# - Think about length of self.points. Always 0 or 1 mod 4?
+# That's kind of weird.
+
+
+[docs]
+class VMobject(Mobject):
+ """A vectorized mobject.
+
+ Parameters
+ ----------
+ background_stroke_color
+ The purpose of background stroke is to have something
+ that won't overlap fill, e.g. For text against some
+ textured background.
+ sheen_factor
+ When a color c is set, there will be a second color
+ computed based on interpolating c to WHITE by with
+ sheen_factor, and the display will gradient to this
+ secondary color in the direction of sheen_direction.
+ close_new_points
+ Indicates that it will not be displayed, but
+ that it should count in parent mobject's path
+ tolerance_for_point_equality
+ This is within a pixel
+ joint_type
+ The line joint type used to connect the curve segments
+ of this vectorized mobject. See :class:`.LineJointType`
+ for options.
+ """
+
+ sheen_factor = 0.0
+
+ def __init__(
+ self,
+ fill_color: ParsableManimColor | None = None,
+ fill_opacity: float = 0.0,
+ stroke_color: ParsableManimColor | None = None,
+ stroke_opacity: float = 1.0,
+ stroke_width: float = DEFAULT_STROKE_WIDTH,
+ background_stroke_color: ParsableManimColor | None = BLACK,
+ background_stroke_opacity: float = 1.0,
+ background_stroke_width: float = 0,
+ sheen_factor: float = 0.0,
+ joint_type: LineJointType | None = None,
+ sheen_direction: Vector3DLike = UL,
+ close_new_points: bool = False,
+ pre_function_handle_to_anchor_scale_factor: float = 0.01,
+ make_smooth_after_applying_functions: bool = False,
+ background_image: Image | str | None = None,
+ shade_in_3d: bool = False,
+ # TODO, do we care about accounting for varying zoom levels?
+ tolerance_for_point_equality: float = 1e-6,
+ n_points_per_cubic_curve: int = 4,
+ cap_style: CapStyleType = CapStyleType.AUTO,
+ **kwargs: Any,
+ ):
+ self.fill_opacity = fill_opacity
+ self.stroke_opacity = stroke_opacity
+ self.stroke_width = stroke_width
+ if background_stroke_color is not None:
+ self.background_stroke_color: ManimColor = ManimColor(
+ background_stroke_color
+ )
+ self.background_stroke_opacity: float = background_stroke_opacity
+ self.background_stroke_width: float = background_stroke_width
+ self.sheen_factor: float = sheen_factor
+ self.joint_type: LineJointType = (
+ LineJointType.AUTO if joint_type is None else joint_type
+ )
+ self.sheen_direction = sheen_direction
+ self.close_new_points: bool = close_new_points
+ self.pre_function_handle_to_anchor_scale_factor: float = (
+ pre_function_handle_to_anchor_scale_factor
+ )
+ self.make_smooth_after_applying_functions: bool = (
+ make_smooth_after_applying_functions
+ )
+ self.background_image: Image | str | None = background_image
+ self.shade_in_3d: bool = shade_in_3d
+ self.tolerance_for_point_equality: float = tolerance_for_point_equality
+ self.n_points_per_cubic_curve: int = n_points_per_cubic_curve
+ self._bezier_t_values: npt.NDArray[float] = np.linspace(
+ 0, 1, n_points_per_cubic_curve
+ )
+ self.cap_style: CapStyleType = cap_style
+ super().__init__(**kwargs)
+ self.submobjects: list[VMobject]
+
+ # TODO: Find where color overwrites are happening and remove the color doubling
+ # if "color" in kwargs:
+ # fill_color = kwargs["color"]
+ # stroke_color = kwargs["color"]
+ if fill_color is not None:
+ self.fill_color = ManimColor.parse(fill_color)
+ if stroke_color is not None:
+ self.stroke_color = ManimColor.parse(stroke_color)
+
+
+[docs]
+ def _assert_valid_submobjects(self, submobjects: Iterable[VMobject]) -> Self:
+ return self._assert_valid_submobjects_internal(submobjects, VMobject)
+
+
+============================================================
+MODULE: manim.mobject.mobject
+============================================================
+"""Base classes for objects that can be displayed."""
+
+from __future__ import annotations
+
+__all__ = ["Mobject", "Group", "override_animate"]
+
+
+import copy
+import inspect
+import itertools as it
+import math
+import operator as op
+import random
+import sys
+import types
+import warnings
+from collections.abc import Callable, Iterable
+from functools import partialmethod, reduce
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+from manim.data_structures import MethodWithArgs
+from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+
+from .. import config, logger
+from ..constants import *
+from ..utils.color import (
+ BLACK,
+ PURE_YELLOW,
+ WHITE,
+ ManimColor,
+ ParsableManimColor,
+ color_gradient,
+ interpolate_color,
+)
+from ..utils.exceptions import MultiAnimationOverrideException
+from ..utils.iterables import list_update, remove_list_redundancies
+from ..utils.paths import straight_path
+from ..utils.space_ops import angle_between_vectors, normalize, rotation_matrix
+
+if TYPE_CHECKING:
+ from typing import Self, TypeAlias
+
+ from manim.typing import (
+ FunctionOverride,
+ MappingFunction,
+ MatrixMN,
+ MultiMappingFunction,
+ PathFuncType,
+ PixelArray,
+ Point3D,
+ Point3DLike,
+ Point3DLike_Array,
+ Vector3DLike,
+ )
+
+ from ..animation.animation import Animation
+
+ TimeBasedUpdater: TypeAlias = Callable[["Mobject", float], object]
+ NonTimeBasedUpdater: TypeAlias = Callable[["Mobject"], object]
+ Updater: TypeAlias = NonTimeBasedUpdater | TimeBasedUpdater
+
+
+[docs]
+class Mobject:
+ """Mathematical Object: base class for objects that can be displayed on screen.
+
+ There is a compatibility layer that allows for
+ getting and setting generic attributes with ``get_*``
+ and ``set_*`` methods. See :meth:`set` for more details.
+
+ Attributes
+ ----------
+ submobjects : List[:class:`Mobject`]
+ The contained objects.
+ points : :class:`numpy.ndarray`
+ The points of the objects.
+
+ .. seealso::
+
+ :class:`~.VMobject`
+
+ """
+
+ animation_overrides = {}
+
+ @classmethod
+ def __init_subclass__(cls, **kwargs) -> None:
+ super().__init_subclass__(**kwargs)
+
+ cls.animation_overrides: dict[
+ type[Animation],
+ FunctionOverride,
+ ] = {}
+ cls._add_intrinsic_animation_overrides()
+ cls._original__init__ = cls.__init__
+
+ def __init__(
+ self,
+ color: ParsableManimColor | list[ParsableManimColor] = WHITE,
+ name: str | None = None,
+ dim: int = 3,
+ target=None,
+ z_index: float = 0,
+ ) -> None:
+ self.name = self.__class__.__name__ if name is None else name
+ self.dim = dim
+ self.target = target
+ self.z_index = z_index
+ self.point_hash = None
+ self.submobjects = []
+ self.updaters: list[Updater] = []
+ self.updating_suspended = False
+ self.color = ManimColor.parse(color)
+
+ self.reset_points()
+ self.generate_points()
+ self.init_colors()
+
+
+[docs]
+ def _assert_valid_submobjects(self, submobjects: Iterable[Mobject]) -> Self:
+ """Check that all submobjects are actually instances of
+ :class:`Mobject`, and that none of them is ``self`` (a
+ :class:`Mobject` cannot contain itself).
+
+ This is an auxiliary function called when adding Mobjects to the
+ :attr:`submobjects` list.
+
+ This function is intended to be overridden by subclasses such as
+ :class:`VMobject`, which should assert that only other VMobjects
+ may be added into it.
+
+ Parameters
+ ----------
+ submobjects
+ The list containing values to validate.
+
+ Returns
+ -------
+ :class:`Mobject`
+ The Mobject itself.
+
+ Raises
+ ------
+ TypeError
+ If any of the values in `submobjects` is not a :class:`Mobject`.
+ ValueError
+ If there was an attempt to add a :class:`Mobject` as its own
+ submobject.
+ """
+ return self._assert_valid_submobjects_internal(submobjects, Mobject)
+
+
+============================================================
+MODULE: manim.mobject.three_d.three_dimensions
+============================================================
+"""Three-dimensional mobjects."""
+
+from __future__ import annotations
+
+__all__ = [
+ "ThreeDVMobject",
+ "Surface",
+ "Sphere",
+ "Dot3D",
+ "Cube",
+ "Prism",
+ "Cone",
+ "Arrow3D",
+ "Cylinder",
+ "Line3D",
+ "Torus",
+]
+
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Self
+
+import numpy as np
+
+from manim import config, logger
+from manim.constants import *
+from manim.mobject.geometry.arc import Circle
+from manim.mobject.geometry.polygram import Square
+from manim.mobject.mobject import *
+from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
+from manim.mobject.opengl.opengl_mobject import OpenGLMobject
+from manim.mobject.types.vectorized_mobject import VectorizedPoint, VGroup, VMobject
+from manim.utils.color import (
+ BLUE,
+ BLUE_D,
+ BLUE_E,
+ LIGHT_GREY,
+ WHITE,
+ ManimColor,
+ ParsableManimColor,
+ interpolate_color,
+)
+from manim.utils.space_ops import normalize, perpendicular_bisector, z_to_vector
+
+if TYPE_CHECKING:
+ from manim.mobject.graphing.coordinate_systems import ThreeDAxes
+ from manim.typing import Point3D, Point3DLike, Vector3D, Vector3DLike
+
+
+[docs]
+class ThreeDVMobject(VMobject, metaclass=ConvertToOpenGL):
+ u_index: int
+ v_index: int
+ u1: float
+ u2: float
+ v1: float
+ v2: float
+
+ def __init__(self, shade_in_3d: bool = True, **kwargs: Any):
+ super().__init__(shade_in_3d=shade_in_3d, **kwargs)
+
+
+============================================================
+MODULE: manim.scene.scene
+============================================================
+"""Basic canvas for animations."""
+
+from __future__ import annotations
+
+from manim.utils.parameter_parsing import flatten_iterable_parameters
+
+from ..mobject.mobject import _AnimationBuilder
+
+__all__ = ["Scene"]
+
+import copy
+import datetime
+import inspect
+import platform
+import random
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from queue import Queue
+
+import srt
+
+from manim.scene.section import DefaultSectionType
+
+try:
+ import dearpygui.dearpygui as dpg
+
+ dearpygui_imported = True
+ dpg.create_context()
+ window = dpg.generate_uuid()
+except ImportError:
+ dearpygui_imported = False
+
+from collections.abc import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from tqdm import tqdm
+from watchdog.events import DirModifiedEvent, FileModifiedEvent, FileSystemEventHandler
+from watchdog.observers import Observer
+
+from manim import __version__
+from manim.data_structures import MethodWithArgs
+from manim.mobject.mobject import Mobject
+from manim.mobject.opengl.opengl_mobject import OpenGLPoint
+
+from .. import config, logger
+from ..animation.animation import Animation, Wait, prepare_animation
+from ..camera.camera import Camera
+from ..constants import *
+from ..renderer.cairo_renderer import CairoRenderer
+from ..renderer.opengl_renderer import OpenGLCamera, OpenGLMobject, OpenGLRenderer
+from ..renderer.shader import Object3D
+from ..utils import opengl, space_ops
+from ..utils.exceptions import EndSceneEarlyException, RerunSceneException
+from ..utils.family import extract_mobject_family_members
+from ..utils.family_ops import restructure_list_to_exclude_certain_family_members
+from ..utils.file_ops import open_media_file
+from ..utils.iterables import list_difference_update, list_update
+from ..utils.module_ops import scene_classes_from_file
+
+if TYPE_CHECKING:
+ from types import FrameType
+ from typing import Self, TypeAlias
+
+ from manim.typing import Point3D
+
+ SceneInteractAction: TypeAlias = (
+ MethodWithArgs | "SceneInteractContinue" | "SceneInteractRerun"
+ )
+ """The SceneInteractAction type alias is used for elements in the queue
+ used by :meth:`.Scene.interact()`.
+
+ The elements can be one of the following three:
+
+ - a :class:`~.MethodWithArgs` object, which represents a :class:`Scene`
+ method to be called along with its args and kwargs,
+ - a :class:`~.SceneInteractContinue` object, indicating that the scene
+ interaction is over and the scene will continue rendering after that, or
+ - a :class:`~.SceneInteractRerun` object, indicating that the scene should
+ render again.
+ """
+
+
+[docs]
+@dataclass
+class SceneInteractContinue:
+ """Object which, when encountered in :meth:`.Scene.interact`, triggers
+ the end of the scene interaction, continuing with the rest of the
+ animations, if any. This object can be queued in :attr:`.Scene.queue`
+ for later use in :meth:`.Scene.interact`.
+
+ Attributes
+ ----------
+ sender : str
+ The name of the entity which issued the end of the scene interaction,
+ such as ``"gui"`` or ``"keyboard"``.
+ """
+
+ __slots__ = ["sender"]
+
+ sender: str
+
+
+============================================================
+MODULE: manim.scene.three_d_scene
+============================================================
+"""A scene suitable for rendering three-dimensional objects and animations."""
+
+from __future__ import annotations
+
+__all__ = ["ThreeDScene", "SpecialThreeDScene"]
+
+
+import warnings
+from collections.abc import Iterable, Sequence
+
+import numpy as np
+
+from manim.mobject.geometry.line import Line
+from manim.mobject.graphing.coordinate_systems import ThreeDAxes
+from manim.mobject.opengl.opengl_mobject import OpenGLMobject
+from manim.mobject.three_d.three_dimensions import Sphere
+from manim.mobject.value_tracker import ValueTracker
+
+from .. import config
+from ..animation.animation import Animation
+from ..animation.transform import Transform
+from ..camera.three_d_camera import ThreeDCamera
+from ..constants import DEGREES, RendererType
+from ..mobject.mobject import Mobject
+from ..mobject.types.vectorized_mobject import VectorizedPoint, VGroup
+from ..renderer.opengl_renderer import OpenGLCamera
+from ..scene.scene import Scene
+from ..utils.config_ops import merge_dicts_recursively
+
+
+[docs]
+class ThreeDScene(Scene):
+ """
+ This is a Scene, with special configurations and properties that
+ make it suitable for Three Dimensional Scenes.
+ """
+
+ def __init__(
+ self,
+ camera_class=ThreeDCamera,
+ ambient_camera_rotation=None,
+ default_angled_camera_orientation_kwargs=None,
+ **kwargs,
+ ):
+ self.ambient_camera_rotation = ambient_camera_rotation
+ if default_angled_camera_orientation_kwargs is None:
+ default_angled_camera_orientation_kwargs = {
+ "phi": 70 * DEGREES,
+ "theta": -135 * DEGREES,
+ }
+ self.default_angled_camera_orientation_kwargs = (
+ default_angled_camera_orientation_kwargs
+ )
+ super().__init__(camera_class=camera_class, **kwargs)
+
+
+[docs]
+ def set_camera_orientation(
+ self,
+ phi: float | None = None,
+ theta: float | None = None,
+ gamma: float | None = None,
+ zoom: float | None = None,
+ focal_distance: float | None = None,
+ frame_center: Mobject | Sequence[float] | None = None,
+ **kwargs,
+ ):
+ """
+ This method sets the orientation of the camera in the scene.
+
+ Parameters
+ ----------
+ phi
+ The polar angle i.e the angle between Z_AXIS and Camera through ORIGIN in radians.
+
+ theta
+ The azimuthal angle i.e the angle that spins the camera around the Z_AXIS.
+
+ focal_distance
+ The focal_distance of the Camera.
+
+ gamma
+ The rotation of the camera about the vector from the ORIGIN to the Camera.
+
+ zoom
+ The zoom factor of the scene.
+
+ frame_center
+ The new center of the camera frame in cartesian coordinates.
+
+ """
+ if phi is not None:
+ self.renderer.camera.set_phi(phi)
+ if theta is not None:
+ self.renderer.camera.set_theta(theta)
+ if focal_distance is not None:
+ self.renderer.camera.set_focal_distance(focal_distance)
+ if gamma is not None:
+ self.renderer.camera.set_gamma(gamma)
+ if zoom is not None:
+ self.renderer.camera.set_zoom(zoom)
+ if frame_center is not None:
+ self.renderer.camera._frame_center.move_to(frame_center)
+
+
+============================================================
+MODULE: manim.mobject.graphing.probability
+============================================================
+"""Mobjects representing objects from probability theory and statistics."""
+
+from __future__ import annotations
+
+__all__ = ["SampleSpace", "BarChart"]
+
+
+from collections.abc import Iterable, MutableSequence, Sequence
+from typing import Any
+
+import numpy as np
+
+from manim import config, logger
+from manim.constants import *
+from manim.mobject.geometry.polygram import Rectangle
+from manim.mobject.graphing.coordinate_systems import Axes
+from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
+from manim.mobject.svg.brace import Brace
+from manim.mobject.text.tex_mobject import MathTex, Tex
+from manim.mobject.types.vectorized_mobject import VGroup, VMobject
+from manim.typing import Vector3D
+from manim.utils.color import (
+ BLUE_E,
+ DARK_GREY,
+ GREEN_E,
+ LIGHT_GREY,
+ MAROON_B,
+ YELLOW,
+ ParsableManimColor,
+ color_gradient,
+)
+from manim.utils.iterables import tuplify
+
+EPSILON = 0.0001
+
+
+[docs]
+class SampleSpace(Rectangle):
+ """A mobject representing a twodimensional rectangular
+ sampling space.
+
+ Examples
+ --------
+ .. manim:: ExampleSampleSpace
+ :save_last_frame:
+
+ class ExampleSampleSpace(Scene):
+ def construct(self):
+ poly1 = SampleSpace(stroke_width=15, fill_opacity=1)
+ poly2 = SampleSpace(width=5, height=3, stroke_width=5, fill_opacity=0.5)
+ poly3 = SampleSpace(width=2, height=2, stroke_width=5, fill_opacity=0.1)
+ poly3.divide_vertically(p_list=np.array([0.37, 0.13, 0.5]), colors=[BLACK, WHITE, GRAY], vect=RIGHT)
+ poly_group = VGroup(poly1, poly2, poly3).arrange()
+ self.add(poly_group)
+ """
+
+ def __init__(
+ self,
+ height: float = 3,
+ width: float = 3,
+ fill_color: ParsableManimColor = DARK_GREY,
+ fill_opacity: float = 1,
+ stroke_width: float = 0.5,
+ stroke_color: ParsableManimColor = LIGHT_GREY,
+ default_label_scale_val: float = 1,
+ ):
+ super().__init__(
+ height=height,
+ width=width,
+ fill_color=fill_color,
+ fill_opacity=fill_opacity,
+ stroke_width=stroke_width,
+ stroke_color=stroke_color,
+ )
+ self.default_label_scale_val = default_label_scale_val
+
+ def add_title(
+ self, title: str = "Sample space", buff: float = MED_SMALL_BUFF
+ ) -> None:
+ # TODO, should this really exist in SampleSpaceScene
+ title_mob = Tex(title)
+ if title_mob.width > self.width:
+ title_mob.width = self.width
+ title_mob.next_to(self, UP, buff=buff)
+ self.title = title_mob
+ self.add(title_mob)
+
+ def add_label(self, label: str) -> None:
+ self.label = label
+
+ def complete_p_list(self, p_list: float | Iterable[float]) -> list[float]:
+ p_list_tuplified: tuple[float] = tuplify(p_list)
+ new_p_list = list(p_list_tuplified)
+ remainder = 1.0 - sum(new_p_list)
+ if abs(remainder) > EPSILON:
+ new_p_list.append(remainder)
+ return new_p_list
+
+ def get_division_along_dimension(
+ self,
+ p_list: float | Iterable[float],
+ dim: int,
+ colors: Sequence[ParsableManimColor],
+ vect: Vector3D,
+ ) -> VGroup:
+ p_list_complete = self.complete_p_list(p_list)
+ colors_in_gradient = color_gradient(colors, len(p_list_complete))
+
+ last_point = self.get_edge_center(-vect)
+ parts = VGroup()
+ for factor, color in zip(p_list_complete, colors_in_gradient, strict=True):
+ part = SampleSpace()
+ part.set_fill(color, 1)
+ part.replace(self, stretch=True)
+ part.stretch(factor, dim)
+ part.move_to(last_point, -vect)
+ last_point = part.get_edge_center(vect)
+ parts.add(part)
+ return parts
+
+ def get_horizontal_division(
+ self,
+ p_list: float | Iterable[float],
+ colors: Sequence[ParsableManimColor] = [GREEN_E, BLUE_E],
+ vect: Vector3D = DOWN,
+ ) -> VGroup:
+ return self.get_division_along_dimension(p_list, 1, colors, vect)
+
+ def get_vertical_division(
+ self,
+ p_list: float | Iterable[float],
+ colors: Sequence[ParsableManimColor] = [MAROON_B, YELLOW],
+ vect: Vector3D = RIGHT,
+ ) -> VGroup:
+ return self.get_division_along_dimension(p_list, 0, colors, vect)
+
+ def divide_horizontally(self, *args: Any, **kwargs: Any) -> None:
+ self.horizontal_parts = self.get_horizontal_division(*args, **kwargs)
+ self.add(self.horizontal_parts)
+
+ def divide_vertically(self, *args: Any, **kwargs: Any) -> None:
+ self.vertical_parts = self.get_vertical_division(*args, **kwargs)
+ self.add(self.vertical_parts)
+
+ def get_subdivision_braces_and_labels(
+ self,
+ parts: VGroup,
+ labels: list[str | VMobject | OpenGLVMobject],
+ direction: Vector3D,
+ buff: float = SMALL_BUFF,
+ min_num_quads: int = 1,
+ ) -> VGroup:
+ label_mobs = VGroup()
+ braces = VGroup()
+ for label, part in zip(labels, parts, strict=False):
+ brace = Brace(part, direction, min_num_quads=min_num_quads, buff=buff)
+ if isinstance(label, (VMobject, OpenGLVMobject)):
+ label_mob = label
+ else:
+ label_mob = MathTex(label)
+ label_mob.scale(self.default_label_scale_val)
+ label_mob.next_to(brace, direction, buff)
+
+ braces.add(brace)
+ assert isinstance(label_mob, VMobject)
+ label_mobs.add(label_mob)
+ parts.braces = braces # type: ignore[attr-defined]
+ parts.labels = label_mobs # type: ignore[attr-defined]
+ parts.label_kwargs = { # type: ignore[attr-defined]
+ "labels": label_mobs.copy(),
+ "direction": direction,
+ "buff": buff,
+ }
+ return VGroup(parts.braces, parts.labels)
+
+ def get_side_braces_and_labels(
+ self,
+ labels: list[str | VMobject | OpenGLVMobject],
+ direction: Vector3D = LEFT,
+ **kwargs: Any,
+ ) -> VGroup:
+ assert hasattr(self, "horizontal_parts")
+ parts = self.horizontal_parts
+ return self.get_subdivision_braces_and_labels(
+ parts, labels, direction, **kwargs
+ )
+
+ def get_top_braces_and_labels(
+ self, labels: list[str | VMobject | OpenGLVMobject], **kwargs: Any
+ ) -> VGroup:
+ assert hasattr(self, "vertical_parts")
+ parts = self.vertical_parts
+ return self.get_subdivision_braces_and_labels(parts, labels, UP, **kwargs)
+
+ def get_bottom_braces_and_labels(
+ self, labels: list[str | VMobject | OpenGLVMobject], **kwargs: Any
+ ) -> VGroup:
+ assert hasattr(self, "vertical_parts")
+ parts = self.vertical_parts
+ return self.get_subdivision_braces_and_labels(parts, labels, DOWN, **kwargs)
+
+ def add_braces_and_labels(self) -> None:
+ for attr in "horizontal_parts", "vertical_parts":
+ if not hasattr(self, attr):
+ continue
+ parts = getattr(self, attr)
+ for subattr in "braces", "labels":
+ if hasattr(parts, subattr):
+ self.add(getattr(parts, subattr))
+
+ def __getitem__(self, index: int) -> SampleSpace:
+ if hasattr(self, "horizontal_parts"):
+ val: SampleSpace = self.horizontal_parts[index]
+ return val
+ elif hasattr(self, "vertical_parts"):
+ val = self.vertical_parts[index]
+ return val
+ return self.split()[index]
+
+
+============================================================
+MODULE: manim.animation.transform_matching_parts
+============================================================
+"""Animations that try to transform Mobjects while keeping track of identical parts."""
+
+from __future__ import annotations
+
+__all__ = ["TransformMatchingShapes", "TransformMatchingTex"]
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from manim.mobject.opengl.opengl_mobject import OpenGLGroup, OpenGLMobject
+from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVGroup, OpenGLVMobject
+
+from .._config import config
+from ..constants import RendererType
+from ..mobject.mobject import Group, Mobject
+from ..mobject.types.vectorized_mobject import VGroup, VMobject
+from .composition import AnimationGroup
+from .fading import FadeIn, FadeOut
+from .transform import FadeTransformPieces, Transform
+
+if TYPE_CHECKING:
+ from ..scene.scene import Scene
+
+
+[docs]
+class TransformMatchingAbstractBase(AnimationGroup):
+ """Abstract base class for transformations that keep track of matching parts.
+
+ Subclasses have to implement the two static methods
+ :meth:`~.TransformMatchingAbstractBase.get_mobject_parts` and
+ :meth:`~.TransformMatchingAbstractBase.get_mobject_key`.
+
+ Basically, this transformation first maps all submobjects returned
+ by the ``get_mobject_parts`` method to certain keys by applying the
+ ``get_mobject_key`` method. Then, submobjects with matching keys
+ are transformed into each other.
+
+ Parameters
+ ----------
+ mobject
+ The starting :class:`~.Mobject`.
+ target_mobject
+ The target :class:`~.Mobject`.
+ transform_mismatches
+ Controls whether submobjects without a matching key are transformed
+ into each other by using :class:`~.Transform`. Default: ``False``.
+ fade_transform_mismatches
+ Controls whether submobjects without a matching key are transformed
+ into each other by using :class:`~.FadeTransform`. Default: ``False``.
+ key_map
+ Optional. A dictionary mapping keys belonging to some of the starting mobject's
+ submobjects (i.e., the return values of the ``get_mobject_key`` method)
+ to some keys belonging to the target mobject's submobjects that should
+ be transformed although the keys don't match.
+ kwargs
+ All further keyword arguments are passed to the submobject transformations.
+
+
+ Note
+ ----
+ If neither ``transform_mismatches`` nor ``fade_transform_mismatches``
+ are set to ``True``, submobjects without matching keys in the starting
+ mobject are faded out in the direction of the unmatched submobjects in
+ the target mobject, and unmatched submobjects in the target mobject
+ are faded in from the direction of the unmatched submobjects in the
+ start mobject.
+
+ """
+
+ def __init__(
+ self,
+ mobject: Mobject,
+ target_mobject: Mobject,
+ transform_mismatches: bool = False,
+ fade_transform_mismatches: bool = False,
+ key_map: dict | None = None,
+ **kwargs,
+ ):
+ if isinstance(mobject, OpenGLVMobject):
+ group_type = OpenGLVGroup
+ elif isinstance(mobject, OpenGLMobject):
+ group_type = OpenGLGroup
+ elif isinstance(mobject, VMobject):
+ group_type = VGroup
+ else:
+ group_type = Group
+
+ source_map = self.get_shape_map(mobject)
+ target_map = self.get_shape_map(target_mobject)
+
+ if key_map is None:
+ key_map = {}
+
+ # Create two mobjects whose submobjects all match each other
+ # according to whatever keys are used for source_map and
+ # target_map
+ transform_source = group_type()
+ transform_target = group_type()
+ for key in set(source_map).intersection(target_map):
+ transform_source.add(source_map[key])
+ transform_target.add(target_map[key])
+ anims = [Transform(transform_source, transform_target, **kwargs)]
+ # User can manually specify when one part should transform
+ # into another despite not matching by using key_map
+ key_mapped_source = group_type()
+ key_mapped_target = group_type()
+ for key1, key2 in key_map.items():
+ if key1 in source_map and key2 in target_map:
+ key_mapped_source.add(source_map[key1])
+ key_mapped_target.add(target_map[key2])
+ source_map.pop(key1, None)
+ target_map.pop(key2, None)
+ if len(key_mapped_source) > 0:
+ anims.append(
+ FadeTransformPieces(key_mapped_source, key_mapped_target, **kwargs),
+ )
+
+ fade_source = group_type()
+ fade_target = group_type()
+ for key in set(source_map).difference(target_map):
+ fade_source.add(source_map[key])
+ for key in set(target_map).difference(source_map):
+ fade_target.add(target_map[key])
+ fade_target_copy = fade_target.copy()
+
+ if transform_mismatches:
+ if "replace_mobject_with_target_in_scene" not in kwargs:
+ kwargs["replace_mobject_with_target_in_scene"] = True
+ anims.append(Transform(fade_source, fade_target, **kwargs))
+ elif fade_transform_mismatches:
+ anims.append(FadeTransformPieces(fade_source, fade_target, **kwargs))
+ else:
+ anims.append(FadeOut(fade_source, target_position=fade_target, **kwargs))
+ anims.append(
+ FadeIn(fade_target_copy, target_position=fade_target, **kwargs),
+ )
+
+ super().__init__(*anims)
+
+ self.to_remove = [mobject, fade_target_copy]
+ self.to_add = target_mobject
+
+ def get_shape_map(self, mobject: Mobject) -> dict:
+ shape_map = {}
+ for sm in self.get_mobject_parts(mobject):
+ key = self.get_mobject_key(sm)
+ if key not in shape_map:
+ if config["renderer"] == RendererType.OPENGL:
+ shape_map[key] = OpenGLVGroup()
+ else:
+ shape_map[key] = VGroup()
+ shape_map[key].add(sm)
+ return shape_map
+
+
+[docs]
+ def clean_up_from_scene(self, scene: Scene) -> None:
+ # Interpolate all animations back to 0 to ensure source mobjects remain unchanged.
+ for anim in self.animations:
+ anim.interpolate(0)
+ scene.remove(self.mobject)
+ scene.remove(*self.to_remove)
+ scene.add(self.to_add)
+
+
+============================================================
+MODULE: manim.scene.moving_camera_scene
+============================================================
+"""A scene whose camera can be moved around.
+
+.. SEEALSO::
+
+ :mod:`.moving_camera`
+
+
+Examples
+--------
+
+.. manim:: ChangingCameraWidthAndRestore
+
+ class ChangingCameraWidthAndRestore(MovingCameraScene):
+ def construct(self):
+ text = Text("Hello World").set_color(BLUE)
+ self.add(text)
+ self.camera.frame.save_state()
+ self.play(self.camera.frame.animate.set(width=text.width * 1.2))
+ self.wait(0.3)
+ self.play(Restore(self.camera.frame))
+
+
+.. manim:: MovingCameraCenter
+
+ class MovingCameraCenter(MovingCameraScene):
+ def construct(self):
+ s = Square(color=RED, fill_opacity=0.5).move_to(2 * LEFT)
+ t = Triangle(color=GREEN, fill_opacity=0.5).move_to(2 * RIGHT)
+ self.wait(0.3)
+ self.add(s, t)
+ self.play(self.camera.frame.animate.move_to(s))
+ self.wait(0.3)
+ self.play(self.camera.frame.animate.move_to(t))
+
+
+.. manim:: MovingAndZoomingCamera
+
+ class MovingAndZoomingCamera(MovingCameraScene):
+ def construct(self):
+ s = Square(color=BLUE, fill_opacity=0.5).move_to(2 * LEFT)
+ t = Triangle(color=YELLOW, fill_opacity=0.5).move_to(2 * RIGHT)
+ self.add(s, t)
+ self.play(self.camera.frame.animate.move_to(s).set(width=s.width*2))
+ self.wait(0.3)
+ self.play(self.camera.frame.animate.move_to(t).set(width=t.width*2))
+
+ self.play(self.camera.frame.animate.move_to(ORIGIN).set(width=14))
+
+.. manim:: MovingCameraOnGraph
+
+ class MovingCameraOnGraph(MovingCameraScene):
+ def construct(self):
+ self.camera.frame.save_state()
+
+ ax = Axes(x_range=[-1, 10], y_range=[-1, 10])
+ graph = ax.plot(lambda x: np.sin(x), color=WHITE, x_range=[0, 3 * PI])
+
+ dot_1 = Dot(ax.i2gp(graph.t_min, graph))
+ dot_2 = Dot(ax.i2gp(graph.t_max, graph))
+ self.add(ax, graph, dot_1, dot_2)
+
+ self.play(self.camera.frame.animate.scale(0.5).move_to(dot_1))
+ self.play(self.camera.frame.animate.move_to(dot_2))
+ self.play(Restore(self.camera.frame))
+ self.wait()
+
+.. manim:: SlidingMultipleScenes
+
+ class SlidingMultipleScenes(MovingCameraScene):
+ def construct(self):
+ def create_scene(number):
+ frame = Rectangle(width=16,height=9)
+ circ = Circle().shift(LEFT)
+ text = Tex(f"This is Scene {str(number)}").next_to(circ, RIGHT)
+ frame.add(circ,text)
+ return frame
+
+ group = VGroup(*(create_scene(i) for i in range(4))).arrange_in_grid(buff=4)
+ self.add(group)
+ self.camera.auto_zoom(group[0], animate=False)
+ for scene in group:
+ self.play(self.camera.auto_zoom(scene))
+ self.wait()
+
+ self.play(self.camera.auto_zoom(group, margin=2))
+"""
+
+from __future__ import annotations
+
+__all__ = ["MovingCameraScene"]
+
+from typing import Any
+
+from manim.animation.animation import Animation
+from manim.mobject.mobject import Mobject
+
+from ..camera.camera import Camera
+from ..camera.moving_camera import MovingCamera
+from ..scene.scene import Scene
+from ..utils.family import extract_mobject_family_members
+from ..utils.iterables import list_update
+
+
+[docs]
+class MovingCameraScene(Scene):
+ """
+ This is a Scene, with special configurations and properties that
+ make it suitable for cases where the camera must be moved around.
+
+ Note: Examples are included in the moving_camera_scene module
+ documentation, see below in the 'see also' section.
+
+ .. SEEALSO::
+
+ :mod:`.moving_camera_scene`
+ :class:`.MovingCamera`
+ """
+
+ def __init__(
+ self, camera_class: type[Camera] = MovingCamera, **kwargs: Any
+ ) -> None:
+ super().__init__(camera_class=camera_class, **kwargs)
+
+
+[docs]
+ def get_moving_mobjects(self, *animations: Animation) -> list[Mobject]:
+ """
+ This method returns a list of all of the Mobjects in the Scene that
+ are moving, that are also in the animations passed.
+
+ Parameters
+ ----------
+ *animations
+ The Animations whose mobjects will be checked.
+ """
+ moving_mobjects = super().get_moving_mobjects(*animations)
+ all_moving_mobjects = extract_mobject_family_members(moving_mobjects)
+ movement_indicators = self.renderer.camera.get_mobjects_indicating_movement() # type: ignore[union-attr]
+ for movement_indicator in movement_indicators:
+ if movement_indicator in all_moving_mobjects:
+ # When one of these is moving, the camera should
+ # consider all mobjects to be moving
+ return list_update(self.mobjects, moving_mobjects)
+ return moving_mobjects

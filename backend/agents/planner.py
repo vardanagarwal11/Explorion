@@ -20,13 +20,13 @@ You are an expert storyboard artist for educational animation videos. \
 Your descriptions are so specific that an animator could build the scene \
 without asking any follow-up questions.
 
-Given the following concepts, create EXACTLY ONE animation scene for EACH concept provided.
+Given the following concepts, create EXACTLY ONE animation scene for EACH concept provided, in the SAME ORDER as the concepts list.
 
 RULES:
-- You must create exactly as many scenes as there are concepts (e.g. if 5 concepts are provided, create exactly 5 scenes).
+- You must create exactly as many scenes as there are concepts (e.g. if 5 concepts are provided, create exactly 5 scenes), in the same order.
 - Use "manim" for every scene.
 
-CRITICAL — Your descriptions must be SPECIFIC and VISUAL. Examples:
+CRITICAL — Your descriptions must be VISUAL and TECHNICAL: specify objects, positions, and colors (#hex). Avoid sentences that sound like instructions to the viewer (e.g. "draw this…", "from x and y plot…", "show the user…"). Write as a spec for an animator, not as text to display on screen. Examples:
 
 BAD description: "Visualize the attention mechanism"
 GOOD description: "Build a 4x4 grid of colored cells representing token embeddings. \

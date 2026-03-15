@@ -44,23 +44,38 @@ EXPECTED_SECTIONS = [
     "Appendices",
 ]
 
-# Sections to skip (per user requirement)
-SKIP_SECTIONS = [
-    "References",
-    "Bibliography",
-    "Appendix",
-    "Appendices",
-    "Checklist",
-    "Acknowledgment",
-    "Acknowledgments",
-    "Acknowledgement",
-    "Acknowledgements",
-    "Author Contributions",
-    "Ethics Statement",
-    "Broader Impact",
-    "Funding",
-    "Disclosure",
-]
+# Sections to skip (per user requirement). Normalized to lowercase for matching.
+SKIP_SECTIONS_SET = {
+    "references", "bibliography", "appendix", "appendices", "footnotes",
+    "checklist", "acknowledgment", "acknowledgments", "acknowledgement", "acknowledgements",
+    "author contributions", "ethics statement", "broader impact", "funding", "disclosure",
+    # ar5iv / HTML artifact headings
+    "download", "download pdf", "download the pdf", "versions of this article",
+    "export citation", "export", "related articles", "related work",
+    "cite this paper", "cite as", "cite", "supplementary material",
+    "supplementary", "about the authors", "conflict of interest", "data availability",
+    "figure captions", "table of contents",
+}
+# Keep a list for code that iterates with .lower() (e.g. filter_sections)
+SKIP_SECTIONS = list(SKIP_SECTIONS_SET)
+
+# Minimum section content length (documented in ARCHITECTURE.md, now enforced)
+MIN_SECTION_CHARS = 100
+
+
+def is_substantive_section(title: str, content: str) -> bool:
+    """Return True only if this section should become a concept."""
+    normalized = (title or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in SKIP_SECTIONS_SET:
+        return False
+    for skip in SKIP_SECTIONS_SET:
+        if skip in normalized:
+            return False
+    if len((content or "").strip()) < MIN_SECTION_CHARS:
+        return False
+    return True
 
 # Header patterns in markdown
 HEADER_PATTERN = re.compile(r'^(#{1,6})\s+(.+)$', re.MULTILINE)
@@ -371,21 +386,19 @@ def find_tables_in_section(
 
 def filter_sections(sections: list[Section]) -> list[Section]:
     """
-    Filter out unwanted sections (References, Bibliography, Acknowledgments, etc.).
+    Filter out unwanted sections (References, Bibliography, Acknowledgments, etc.)
+    and enforce minimum length. Only substantive sections are kept.
     """
     filtered = []
     skip_from_here = False
 
     for section in sections:
-        title_lower = section.title.lower().strip()
+        title_lower = (section.title or "").lower().strip()
 
-        # Check if this is a section to skip
-        # Use bidirectional substring check so both
-        # "Acknowledgment" in "Acknowledgments" AND
-        # "Acknowledgments" in "Acknowledgment" work
-        should_skip = any(
-            skip.lower() in title_lower or title_lower in skip.lower()
-            for skip in SKIP_SECTIONS
+        # Check if this is a section to skip (set is already lowercase)
+        should_skip = (
+            title_lower in SKIP_SECTIONS_SET
+            or any(skip in title_lower for skip in SKIP_SECTIONS_SET)
         )
 
         # Also skip appendices that come after references
@@ -399,7 +412,8 @@ def filter_sections(sections: list[Section]) -> list[Section]:
         if not should_skip:
             filtered.append(section)
 
-    return filtered
+    # Enforce substantive sections only: min length + no junk headings
+    return [s for s in filtered if is_substantive_section(s.title, s.content)]
 
 
 def build_hierarchy(sections: list[Section]) -> list[Section]:

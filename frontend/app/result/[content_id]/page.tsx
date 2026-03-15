@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -58,6 +58,10 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
     const [error, setError] = useState("");
     const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
+    // Only set initial section once per content_id; never reset on polling
+    const initialSectionSetRef = useRef(false);
+    const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     // Resolve relative URLs (like /api/video/xxx) to absolute with backend host
     const resolveUrl = (url: string | undefined | null): string | undefined => {
         if (!url) return undefined;
@@ -66,17 +70,18 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
     };
 
     useEffect(() => {
+        initialSectionSetRef.current = false;
         let isActive = true;
-        const fetchData = async () => {
+
+        const fetchData = async (isPolling: boolean = false) => {
             try {
                 const res = await fetch(`${API_URL}/api/paper/${unwrappedParams.content_id}`);
                 if (!res.ok) throw new Error("Could not fetch the result data.");
                 const json = await res.json();
-                
+
                 if (!isActive) return;
 
                 if (json.sections) {
-                    // Filter out sections named "Abstract" as they are shown in a separate tab
                     json.sections = json.sections.filter((s: Section) => s.title.toLowerCase() !== "abstract").map((s: Section) => ({
                         ...s,
                         video_url: resolveUrl(s.video_url),
@@ -92,20 +97,39 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                         audio_url: resolveUrl(v.audio_url),
                     }));
                 }
-                setData(json);
 
-                // Initialize active section only once when loading finishes initially
-                if (loading && json.sections && json.sections.length > 0) {
-                    setActiveSectionId(json.sections[0].id);
+                if (isPolling) {
+                    // Silent update: merge new URLs into existing data so we don't reset UI or active section
+                    setData((prev) => {
+                        if (!prev) return json;
+                        const sectionMap = new Map((json.sections || []).map((s: Section) => [s.id, s]));
+                        const mergedSections = (prev.sections || []).map((sec: Section) => {
+                            const updated = sectionMap.get(sec.id);
+                            return updated ? { ...sec, ...updated } : sec;
+                        });
+                        return {
+                            ...prev,
+                            ...json,
+                            sections: mergedSections.length > 0 ? mergedSections : (json.sections || prev.sections),
+                            visualizations: json.visualizations ?? prev.visualizations,
+                        };
+                    });
+                } else {
+                    setData(json);
+                    if (!initialSectionSetRef.current && json.sections?.length > 0) {
+                        initialSectionSetRef.current = true;
+                        setActiveSectionId(json.sections[0].id);
+                    }
                 }
                 setLoading(false);
 
-                // If any visualization is incomplete, keep polling
                 const isIncomplete = json.visualizations?.some((v: Visualization) => v.status !== "completed" && v.status !== "failed");
                 const isMissingViz = !json.visualizations || json.visualizations.length < (json.sections?.length || 0);
 
                 if (isIncomplete || isMissingViz) {
-                    setTimeout(fetchData, 5000); // Poll every 5 seconds
+                    pollingTimeoutRef.current = setTimeout(() => fetchData(true), 5000);
+                } else {
+                    pollingTimeoutRef.current = null;
                 }
             } catch (err: any) {
                 if (isActive) {
@@ -115,8 +139,14 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
             }
         };
 
-        fetchData();
-        return () => { isActive = false; };
+        fetchData(false);
+        return () => {
+            isActive = false;
+            if (pollingTimeoutRef.current) {
+                clearTimeout(pollingTimeoutRef.current);
+                pollingTimeoutRef.current = null;
+            }
+        };
     }, [unwrappedParams.content_id]);
 
     if (loading) {

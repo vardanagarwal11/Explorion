@@ -43,6 +43,37 @@ logger = logging.getLogger(__name__)
 # Minimum acceptable duration — scenes shorter than this use fallback code
 MIN_SCENE_DURATION_SECONDS = 10.0
 
+# Pattern to find Text/MathTex/Tex/MarkupText calls with long string arguments (suspicious)
+DESCRIPTION_AS_TEXT_PATTERN = re.compile(
+    r"(Text|MathTex|Tex|MarkupText)\s*\(\s*[\"'](.{40,})[\"']",
+    re.DOTALL,
+)
+
+
+def _validate_manim_code(code: str, scene_description: str) -> list[str]:
+    """
+    Returns a list of warnings. Empty list = code is acceptable.
+    Catches description/instructions being displayed as on-screen text.
+    """
+    warnings: list[str] = []
+    if not code or len(code.strip()) < 50:
+        warnings.append("Code is empty or trivially short.")
+        return warnings
+
+    desc_fragment = (scene_description or "").strip()[:60].lower()
+    for match in DESCRIPTION_AS_TEXT_PATTERN.finditer(code):
+        found_text = (match.group(2) or "").lower()
+        if desc_fragment and len(desc_fragment) >= 30 and desc_fragment[:30] in found_text:
+            warnings.append(
+                f"Code appears to display the scene description as text: {match.group(2)[:60]!r}"
+            )
+        elif len(match.group(2)) > 80:
+            warnings.append(
+                f"Suspiciously long Text() call — may be displaying instructions: {match.group(2)[:60]!r}"
+            )
+
+    return warnings
+
 
 def _probe_duration_seconds(video_path: str) -> float | None:
     """Return video duration in seconds when probe succeeds."""
@@ -165,7 +196,7 @@ def extract_content(state: PipelineState) -> dict:
 
     input_url = state.get("input_url", "")
     input_type = state.get("input_type") or _detect_input_type(input_url)
-    logger.info("[Node] extract_content | type=%s url=%s", input_type, input_url[:80])
+    logger.info("[Node] extract_content | type=%s url=%s", input_type, (input_url[:80] if input_url else "(empty)"))
 
     try:
         if input_type == "arxiv":
@@ -196,19 +227,30 @@ def extract_content(state: PipelineState) -> dict:
 
 def summarize(state: PipelineState) -> dict:
     """Run LLM summarizer to extract structured concepts."""
-    if state.get("summary"):
-        logger.info("[Node] summarize | using pre-injected summary")
+    if state.get("summary") and state["summary"].get("main_concepts") is not None:
+        logger.info("[Node] summarize | using pre-injected summary (%d concepts)", len(state["summary"].get("main_concepts", [])))
         return {}
-    
-    logger.info("[Node] summarize | content=%s", state.get("content_title", "?"))
-    summary = run_summarizer(state["content"])
+
+    content = (state.get("content") or "").strip()
+    if not content:
+        logger.warning("[Node] summarize | no content to summarize; returning empty concepts")
+        return {"summary": {"title": state.get("content_title") or "Unknown", "main_concepts": []}}
+
+    logger.info("[Node] summarize | content=%s (%d chars)", state.get("content_title", "?"), len(content))
+    summary = run_summarizer(content)
     return {"summary": summary}
 
 
 def plan_scenes(state: PipelineState) -> dict:
     """Run LLM planner to convert concepts into a scene list."""
-    logger.info("[Node] plan_scenes")
-    plan = run_planner(state["summary"])
+    summary = state.get("summary") or {}
+    main_concepts = summary.get("main_concepts") or []
+    if not main_concepts:
+        logger.warning("[Node] plan_scenes | no main_concepts in summary; skipping planner to avoid generic default scenes")
+        return {"scenes": [], "current_scene_index": 0}
+
+    logger.info("[Node] plan_scenes | %d concepts", len(main_concepts))
+    plan = run_planner(summary)
     scenes = [
         {
             "title": s["title"],
@@ -223,7 +265,7 @@ def plan_scenes(state: PipelineState) -> dict:
 
 
 def generate_codes(state: PipelineState) -> dict:
-    """Generate animation code for every scene."""
+    """Generate animation code for every scene. Validates code and retries once if description-as-text detected."""
     logger.info("[Node] generate_codes | %d scenes", len(state.get("scenes", [])))
     updated = []
     errors = list(state.get("errors", []))
@@ -231,6 +273,16 @@ def generate_codes(state: PipelineState) -> dict:
     for scene in state["scenes"]:
         try:
             code = run_coder(scene)
+            issues = _validate_manim_code(code, scene.get("description", ""))
+            if issues:
+                logger.warning("Code validation warnings for %r: %s", scene.get("title"), issues)
+                code = run_coder(
+                    scene,
+                    extra_instruction=(
+                        "IMPORTANT: Do NOT use Text() to display the scene description. "
+                        "Animate the concept visually instead."
+                    ),
+                )
             updated.append({**scene, "code": code})
         except Exception as exc:
             logger.warning("Coder error for scene %r: %s", scene["title"], exc)
@@ -261,7 +313,12 @@ def render_scenes(state: PipelineState) -> dict:
                 i + 1, len(state["scenes"]), engine, scene.get("title", ""),
             )
 
-            rendered_path = render_manim(scene["code"], scene_id=scene_id)
+            rendered_path = render_manim(
+                scene["code"],
+                scene_id=scene_id,
+                scene_title=scene.get("title", ""),
+                scene_description=scene.get("description", ""),
+            )
 
             # Check duration — if too short, log warning but keep it
             duration = _probe_duration_seconds(rendered_path)
@@ -391,18 +448,25 @@ def run_pipeline(
     graph = _get_graph()
     final_state = graph.invoke(initial_state)
 
+    scenes_out = [
+        {
+            "title": s["title"],
+            "engine": s["engine"],
+            "description": s["description"],
+            "code": s.get("code", ""),
+            "video_path": s.get("video_path", ""),
+        }
+        for s in final_state.get("scenes", [])
+    ]
+    plan_out = [
+        {"title": s["title"], "engine": s.get("engine", "manim"), "description": s.get("description", "")}
+        for s in final_state.get("scenes", [])
+    ]
     return {
         "title": final_state.get("content_title", ""),
         "content_id": final_state.get("content_id", ""),
-        "scenes": [
-            {
-                "title": s["title"],
-                "engine": s["engine"],
-                "description": s["description"],
-                "code": s.get("code", ""),
-                "video_path": s.get("video_path", ""),
-            }
-            for s in final_state.get("scenes", [])
-        ],
+        "summary": final_state.get("summary", {}),
+        "plan": plan_out,
+        "scenes": scenes_out,
         "errors": final_state.get("errors", []),
     }

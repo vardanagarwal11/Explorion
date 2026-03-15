@@ -41,6 +41,7 @@ Return ONLY a JSON object in this exact format — no explanation, no markdown, 
 }}
 
 Limit to the 5 most important concepts.
+If there are no clear visualizable concepts in the content, return "main_concepts" as an empty array [].
 
 LENGTH LIMITS (MANDATORY):
 - Keep each `name` to at most 6 words.

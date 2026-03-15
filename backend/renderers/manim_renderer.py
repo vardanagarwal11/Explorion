@@ -41,48 +41,46 @@ def _extract_scene_class(code: str) -> str:
     return m.group(1) if m else "MainScene"
 
 
-def _fallback_scene_code(scene_id: str) -> str:
-    """Safe Text-only scene used if generated code fails to render."""
-    safe = scene_id.replace('"', "")
+def _fallback_scene_code(
+    scene_id: str,
+    scene_title: str = "",
+    scene_description: str = "",
+) -> str:
+    """Safe Text-only scene used if generated code fails to render. Uses actual scene title/description when provided."""
+    def _safe(s: str, max_len: int = 80) -> str:
+        return s.strip()[:max_len].replace("\\", "\\\\").replace('"', "'").replace("\n", " ")
+
+    safe_id = _safe(scene_id, 40) or "Scene"
+    title_text = _safe(scene_title or "Visualization", 60)
+    desc_text = _safe(scene_description or "Rendering failed; this is a fallback placeholder.", 120)
     return f'''\
 from manim import *
 
 class MainScene(Scene):
     def construct(self):
-        # Phase 1: Title (0-5s)
-        title = Text("Explorion Scene", font_size=48, color=BLUE)
-        self.play(Write(title), run_time=2)
-        self.wait(3)
+        bg = Rectangle(width=16, height=9, fill_color="#0f0f23", fill_opacity=1, stroke_width=0)
+        self.add(bg)
 
-        # Phase 2: Subtitle (5-9s)
-        subtitle = Text("Visualizing: {safe}", font_size=26)
-        subtitle.next_to(title, DOWN)
-        self.play(FadeIn(subtitle, shift=UP))
-        self.wait(3)
+        title = Text("{title_text}", font_size=40, color="#E0E0FF", weight=BOLD)
+        self.play(Write(title), run_time=1.5)
+        self.wait(2)
 
-        # Phase 3: Phase labels (9-16s)
-        self.play(FadeOut(title), FadeOut(subtitle))
-        phase1 = Text("Phase 1: Introduction", font_size=28, color=GREEN)
-        self.play(Write(phase1))
-        self.wait(3)
-        self.play(FadeOut(phase1))
+        subtitle = Text("Visualizing: {safe_id}", font_size=22, color="#B0BEC5")
+        subtitle.next_to(title, DOWN, buff=0.3)
+        self.play(FadeIn(subtitle))
+        self.wait(2)
 
-        phase2 = Text("Phase 2: Core Mechanism", font_size=28, color=YELLOW)
-        self.play(Write(phase2))
-        self.wait(3)
-        self.play(FadeOut(phase2))
-
-        # Phase 4: Result (16-22s)
-        phase3 = Text("Phase 3: Result & Takeaway", font_size=28, color=RED)
-        self.play(Write(phase3))
-        self.wait(3)
-        self.play(FadeOut(phase3))
-
-        # Phase 5: Summary (22-27s)
-        summary = Text("Summary", font_size=36, color=WHITE)
-        self.play(Write(summary))
+        card = RoundedRectangle(
+            width=12, height=2.2, corner_radius=0.2,
+            fill_color="#1a1a3e", fill_opacity=0.9,
+            stroke_color="#6C63FF", stroke_width=2,
+        )
+        desc = Text("{desc_text}", font_size=20, color="#B0BEC5")
+        content = VGroup(card, desc)
+        content.to_edge(DOWN, buff=0.8)
+        self.play(FadeIn(content, shift=UP * 0.3))
         self.wait(4)
-        self.play(FadeOut(summary))
+        self.play(*[FadeOut(mob) for mob in self.mobjects])
         self.wait(1)
 '''
 
@@ -96,13 +94,20 @@ def _find_output_mp4(media_dir: Path, stem: str, scene_name: str) -> Path | None
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
-def render_manim(code: str, scene_id: str | None = None) -> str:
+def render_manim(
+    code: str,
+    scene_id: str | None = None,
+    scene_title: str = "",
+    scene_description: str = "",
+) -> str:
     """
     Render a Manim Python script and return the path to the output MP4.
 
     Args:
-        code:     Complete Manim Python source code.
-        scene_id: Optional identifier used for the output filename.
+        code:             Complete Manim Python source code.
+        scene_id:         Optional identifier used for the output filename.
+        scene_title:      Used in fallback scene if primary render fails.
+        scene_description: Used in fallback scene if primary render fails.
 
     Returns:
         Absolute path string to the rendered MP4 file.
@@ -135,10 +140,13 @@ def render_manim(code: str, scene_id: str | None = None) -> str:
         )
 
         if result.returncode != 0:
-            logger.warning("Primary render failed; retrying with safe fallback scene")
+            logger.warning(
+                "Primary render failed; retrying with safe fallback scene (title=%r)",
+                (scene_title or scene_id)[:50],
+            )
             logger.error("Manim stderr:\n%s", result.stderr[-2000:])
 
-            fallback_code = _fallback_scene_code(scene_id)
+            fallback_code = _fallback_scene_code(scene_id, scene_title, scene_description)
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".py", prefix=f"fallback_{scene_id}_", delete=False, encoding="utf-8"
             ) as ff:
