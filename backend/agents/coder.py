@@ -31,15 +31,22 @@ You are a world-class Manim animation developer who creates visually stunning,
 Write a complete, self-contained Manim Python script for the following scene.
 
 CRITICAL RULES:
-1. NEVER display the scene description or any instruction text as on-screen text.
+
+1. DISPLAY THE SCENE TITLE AT START (MANDATORY):
+   - First thing in construct(): create a title text object
+   - Example: title_text = Text("{title}", font_size=48, color=WHITE)
+   - Position it: title_text.to_edge(UP, buff=0.5)
+   - Animate it: self.play(FadeIn(title_text), run_time=0.8)
+   - Keep visible at least 1.5 seconds
+   - Then either fade to 40% opacity or move to corner as background label
+
+2. NEVER display the scene description/brief as text:
+   The description is your private build instructions only.
    BAD:  Text("Build a 3D graph with x, y, z axes showing...")
-   GOOD: Create the actual 3D axes and animate them.
-2. The scene description is YOUR PRIVATE BRIEF — it tells you what to build.
-   It must NEVER appear as a Manim Text(), MathTex(), or Tex() object.
-3. All on-screen text must be short labels that explain what the viewer is seeing
-   (e.g. axis names, formula components) — not instructions to yourself.
-4. If unsure what to animate, draw a simple geometric representation of the concept
-   rather than writing the description as text.
+   GOOD: Actually build the 3D axes and animate them.
+
+3. All other on-screen text must label what the viewer sees
+   (axis names, formula parts, concept labels) — never instructions.
 
 VISUAL DESIGN RULES (MANDATORY):
 1. ALWAYS start with a dark background rectangle.
@@ -56,9 +63,10 @@ VISUAL DESIGN RULES (MANDATORY):
 6. Use RoundedRectangle for cards/containers.
 7. Use VGroup to organize related elements.
 8. Build connected visual diagrams (arrows/links), not plain text slides.
-9. Animate elements in sequence with lag_ratio where relevant.
-10. Use Transform/ReplacementTransform for state changes.
-11. PROFESSIONAL STYLE ONLY:
+9. LABEL EVERY NODE: In any diagram (circuit, graph, flowchart, architecture, gate diagram), every node/shape/gate that represents a concept MUST have a visible label (e.g. Text(...) or MathTex(...) with next_to(shape) or placed on/near the shape) so the viewer immediately knows what each element is. No unlabeled boxes, circles, or gates. Use short names (e.g. NOT, AND, Encoder, Input, Query).
+10. Animate elements in sequence with lag_ratio where relevant.
+11. Use Transform/ReplacementTransform for state changes.
+12. PROFESSIONAL STYLE ONLY:
    - Technical, publication-grade visuals.
    - No emoji, no sticker/cartoony motifs.
 

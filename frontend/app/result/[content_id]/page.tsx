@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useEffect, useState, useRef } from "react";
-import ReactMarkdown from "react-markdown";
+import { MarkdownContent } from "@/components/MarkdownContent";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -82,7 +82,9 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                 if (!isActive) return;
 
                 if (json.sections) {
-                    json.sections = json.sections.filter((s: Section) => s.title.toLowerCase() !== "abstract").map((s: Section) => ({
+                    const nonAbstract = json.sections.filter((s: Section) => s.title.toLowerCase() !== "abstract");
+                    const sectionsToShow = nonAbstract.length > 0 ? nonAbstract : json.sections;
+                    json.sections = sectionsToShow.map((s: Section) => ({
                         ...s,
                         video_url: resolveUrl(s.video_url),
                         subtitle_url: resolveUrl(s.subtitle_url),
@@ -294,9 +296,7 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                                             
                                             {activeSectionId === sec.id ? (
                                                 <div className="text-sm text-white/80 leading-relaxed prose prose-invert prose-sm max-w-none mt-2">
-                                                    <ReactMarkdown>
-                                                        {sec.summary || sec.content || 'No content available.'}
-                                                    </ReactMarkdown>
+                                                    <MarkdownContent content={sec.summary || sec.content || 'No content available.'} />
                                                 </div>
                                             ) : (
                                                 <p className="text-xs text-white/50 line-clamp-2 leading-relaxed">
@@ -330,7 +330,7 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                             <ScrollArea className="h-full w-full pr-4">
                                 <h3 className="text-white text-lg font-bold mb-4 font-sans leading-snug">{data.title}</h3>
                                 <div className="prose prose-invert prose-sm prose-p:leading-loose text-white/60 font-sans max-w-none">
-                                    <ReactMarkdown>{data.abstract}</ReactMarkdown>
+                                    <MarkdownContent content={data.abstract || ""} />
                                 </div>
 
                                 {(data.pdf_url || data.source_url) && (

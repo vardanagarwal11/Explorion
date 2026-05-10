@@ -92,9 +92,10 @@ export default function DocumentReaderPage({
           <div className="flex items-center gap-3">
             <Link
               href="/reader"
-              className="flex items-center text-white/40 hover:text-white/70 transition-colors"
+              className="flex items-center min-w-[44px] min-h-[44px] justify-center rounded text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+              aria-label="Back to document list"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-4 h-4" aria-hidden />
             </Link>
             <div className="w-px h-4 bg-white/15" />
             <Image
@@ -144,44 +145,68 @@ export default function DocumentReaderPage({
           className="flex-[2] max-w-[420px] min-w-[320px] flex flex-col overflow-hidden bg-black/50"
         >
           {/* Tabs */}
-          <div className="flex border-b border-white/10 flex-shrink-0">
+          <div
+            role="tablist"
+            aria-label="AI assistant"
+            className="flex border-b border-white/10 flex-shrink-0"
+          >
             <button
-              className={`flex-1 py-3 text-center text-xs tracking-wider transition-all border-b-2 ${
+              type="button"
+              role="tab"
+              aria-selected={aiTab === "explain"}
+              aria-controls="panel-explain"
+              id="tab-explain"
+              className={`flex-1 min-h-[44px] py-3 text-center text-xs tracking-wider transition-all border-b-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-inset cursor-pointer ${
                 aiTab === "explain"
                   ? "text-white/80 border-white/40 bg-white/[0.04]"
                   : "text-white/30 border-transparent hover:text-white/50 hover:bg-white/[0.02]"
               }`}
               onClick={() => setAiTab("explain")}
             >
-              ✨ EXPLAIN
+              EXPLAIN
             </button>
             <button
-              className={`flex-1 py-3 text-center text-xs tracking-wider transition-all border-b-2 ${
+              type="button"
+              role="tab"
+              aria-selected={aiTab === "ask"}
+              aria-controls="panel-ask"
+              id="tab-ask"
+              className={`flex-1 min-h-[44px] py-3 text-center text-xs tracking-wider transition-all border-b-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-inset cursor-pointer ${
                 aiTab === "ask"
                   ? "text-white/80 border-white/40 bg-white/[0.04]"
                   : "text-white/30 border-transparent hover:text-white/50 hover:bg-white/[0.02]"
               }`}
               onClick={() => setAiTab("ask")}
             >
-              💬 ASK
+              ASK
             </button>
           </div>
 
           {/* Tab content */}
-          <div className="flex-1 overflow-y-auto p-4">
-            {aiTab === "explain" && (
-              <ExplainPopover
-                selectedText={selectedText}
-                explanation={explanation}
-                isExplaining={isExplaining}
-                error={explainError}
-                onExplain={handleExplain}
-                documentReady={true}
-              />
-            )}
-            {aiTab === "ask" && (
-              <QuestionPanel documentReady={true} onAsk={handleAsk} />
-            )}
+          <div
+            id="panel-explain"
+            role="tabpanel"
+            aria-labelledby="tab-explain"
+            hidden={aiTab !== "explain"}
+            className="flex-1 overflow-y-auto p-4"
+          >
+            <ExplainPopover
+              selectedText={selectedText}
+              explanation={explanation}
+              isExplaining={isExplaining}
+              error={explainError}
+              onExplain={handleExplain}
+              documentReady={true}
+            />
+          </div>
+          <div
+            id="panel-ask"
+            role="tabpanel"
+            aria-labelledby="tab-ask"
+            hidden={aiTab !== "ask"}
+            className="flex-1 overflow-y-auto p-4"
+          >
+            <QuestionPanel documentReady={true} onAsk={handleAsk} />
           </div>
         </motion.div>
       </div>

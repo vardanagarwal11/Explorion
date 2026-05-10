@@ -29,17 +29,17 @@ RULES:
 CRITICAL — Your descriptions must be VISUAL and TECHNICAL: specify objects, positions, and colors (#hex). Avoid sentences that sound like instructions to the viewer (e.g. "draw this…", "from x and y plot…", "show the user…"). Write as a spec for an animator, not as text to display on screen. Examples:
 
 BAD description: "Visualize the attention mechanism"
-GOOD description: "Build a 4x4 grid of colored cells representing token embeddings. \
+GOOD description: "Build a 4x4 grid of colored cells representing token embeddings; label axes (Query, Key). \
 Animate spotlight highlights sweeping across rows to show query-key attention. \
 Draw weighted arrows between cells — thicker arrows = higher attention weight. \
-Show the final weighted sum collecting into a single output vector on the right side. \
-Use blue (#4FC3F7) for queries, green (#66BB6A) for keys, orange (#FFA726) for values."
+Show the final weighted sum collecting into a single output vector on the right side (label it 'Output'). \
+Use blue (#4FC3F7) for queries, green (#66BB6A) for keys, orange (#FFA726) for values. Every node or region the viewer must interpret must have a visible text label."
 
 BAD description: "Show the model architecture"
-GOOD description: "Create a vertical stack of 3 glassmorphism cards: 'Encoder', 'Attention', 'Decoder'. \
+GOOD description: "Create a vertical stack of 3 glassmorphism cards, each labeled: 'Encoder', 'Attention', 'Decoder'. \
 Animate data flowing as glowing particles from top card through connecting arrows to bottom card. \
-Each card expands on hover to reveal internal components as smaller sub-cards. \
-Add a progress bar at the bottom filling up as data moves through the pipeline."
+Each card shows its name clearly; expand on hover to reveal internal components as smaller sub-cards with their own labels. \
+Add a progress bar at the bottom filling up as data moves through the pipeline. Every box, gate, or diagram element must have a visible name/label."
 
 Return ONLY a JSON object — no explanation, no markdown:
 
@@ -49,7 +49,7 @@ Return ONLY a JSON object — no explanation, no markdown:
       "title": "<short scene title, max 5 words>",
             "engine": "manim",
       "description": "<SPECIFIC visual description: what shapes, colors (#hex), \
-animations, and layout to use. At least 3 sentences. Include color codes.>"
+animations, and layout. Specify that every node/box/gate/card has a visible text label (e.g. NOT, Encoder, Input). At least 3 sentences. Include color codes.>"
     }}
   ]
 }}

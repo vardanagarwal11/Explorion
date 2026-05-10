@@ -34,6 +34,9 @@ MAX_PREDICT_TOKENS = 300
 CHUNK_SIZE_TOKENS = 200
 CHUNK_OVERLAP_TOKENS = 40
 
+# L2 distance threshold for RAG: only use chunks with distance below this (lower = more similar).
+MAX_L2_DISTANCE = 0.8
+
 BASE_DIR = os.path.dirname(__file__)
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 CHROMA_DIR = os.path.join(BASE_DIR, "chroma_store")
@@ -242,7 +245,8 @@ def get_or_create_collection(document_id: str):
 
 def build_context_from_query(
     collection, query_embedding: List[float], document_id: str, n: int = 5
-) -> str:
+) -> str | None:
+    """Return joined chunk texts for chunks whose L2 distance is below MAX_L2_DISTANCE, or None if none qualify."""
     try:
         count = collection.count()
     except Exception:
@@ -256,18 +260,29 @@ def build_context_from_query(
             query_embeddings=[query_embedding],
             n_results=n_results,
             where={"document_id": document_id},
+            include=["documents", "metadatas", "distances"],
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Vector search failed: {exc}") from exc
 
     logger.info(f"build_context: Query done in {time.time() - t0:.2f}s")
 
-    metadatas = results.get("metadatas", [[]])[0]
-    if not metadatas:
-        raise HTTPException(status_code=404, detail="No context found for this document")
+    docs = results.get("documents", [[]])[0]
+    distances = results.get("distances", [[]])[0]
+    if not docs or not distances:
+        return None
 
-    chunks = [m.get("text", "") for m in metadatas if m.get("text")]
-    return "\n\n---\n\n".join(chunks)
+    # Chroma uses L2 distance: lower = more similar. Keep only chunks below threshold.
+    filtered_chunks = [
+        text for text, dist in zip(docs, distances)
+        if dist < MAX_L2_DISTANCE and (text or "").strip()
+    ]
+    # Fallback: if nothing passed the filter, use top 3 anyway (helps broad questions like "what is this about?")
+    if not filtered_chunks:
+        filtered_chunks = [t for t in docs[:3] if (t or "").strip()]
+    if not filtered_chunks:
+        return None
+    return "\n\n---\n\n".join(filtered_chunks)
 
 
 # ---------------------------------------------------------------------------
@@ -380,10 +395,14 @@ async def explain_highlight_stream(body: ExplainRequest):
     if not body.selected_text.strip():
         raise HTTPException(status_code=400, detail="selected_text must not be empty")
 
+    doc = documents.get(body.document_id)
+    document_title = doc.title if doc else "a document"
+
     prompt = (
-        "You are a helpful assistant explaining a concept from a document.\n\n"
-        f"Explain the following text briefly in 2-3 sentences:\n\n"
-        f"\"{body.selected_text}\""
+        f'A user is reading a document titled "{document_title}" and selected this text:\n\n'
+        f'"{body.selected_text}"\n\n'
+        "Explain what this means in the context of that document. "
+        "Adapt your tone to the document type — technical for specs, simple for general reading, etc."
     )
 
     return StreamingResponse(
@@ -394,6 +413,13 @@ async def explain_highlight_stream(body: ExplainRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+async def _stream_fallback_message(message: str) -> AsyncGenerator[str, None]:
+    """Yield a single SSE message then [DONE]."""
+    escaped = message.replace("\n", "\\n")
+    yield f"data: {escaped}\n\n"
+    yield "data: [DONE]\n\n"
 
 
 @router.post("/ask/stream")
@@ -407,14 +433,28 @@ async def ask_question_stream(body: AskRequest):
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="question must not be empty")
 
+    doc = documents.get(body.document_id)
+    document_title = doc.title if doc else "a document"
+
     collection = get_or_create_collection(body.document_id)
     [query_embedding] = await embed_texts([body.question])
-    context = build_context_from_query(collection, query_embedding, body.document_id, n=3)
+    context = build_context_from_query(collection, query_embedding, body.document_id, n=5)
+
+    if context is None:
+        logger.info("ask_stream: No chunks available, returning fallback")
+        return StreamingResponse(
+            _stream_fallback_message("I couldn't find relevant information in the document for that question."),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     prompt = (
-        "You are answering questions about a PDF document.\n\n"
-        "Use ONLY the information provided in the context below.\n"
-        "Do not rely on external knowledge.\n\n"
+        f'You are answering questions about a PDF titled "{document_title}".\n\n'
+        "Use ONLY the context below to answer. If the question is broad (e.g. \"what is this about?\"), "
+        "summarize based on the context provided.\n\n"
         "Context:\n"
         f"{context}\n\n"
         "Question:\n"

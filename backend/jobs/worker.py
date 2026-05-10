@@ -129,7 +129,7 @@ def is_valid_concept(concept: dict) -> bool:
     description = (concept.get("description") or concept.get("explanation")) or ""
     if any(block in title for block in CONCEPT_BLOCKLIST):
         return False
-    if len(description.strip()) < 40:
+    if len(description.strip()) < 10:
         return False
     return True
 
