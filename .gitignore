@@ -57,3 +57,4 @@ server/outputs/*
 manim-mcp-server/
 
 backend/bin
+backend/sox_download.zip

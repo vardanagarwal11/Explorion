@@ -7,6 +7,9 @@ Windows-safe implementation:
    (libx264 malloc crash on Python 3.14 / Windows)
  - Stream-copy: packets are muxed without decode/encode so libx264 is never opened
  - Auto-detects manim.exe inside the local venv (Scripts/ on Windows)
+ - Resolves ffmpeg via imageio_ffmpeg (bundled in venv) as primary,
+   backend/bin/ as secondary, then system PATH
+ - Stubs out sox with a Python-based ffmpeg wrapper when sox is not installed
 """
 
 import asyncio
@@ -14,6 +17,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -33,6 +37,95 @@ def get_manim_executable() -> str:
         if candidate.exists():
             return str(candidate)
     return "manim"
+
+
+def _get_ffmpeg_path() -> str:
+    """Resolve ffmpeg binary path.
+
+    Priority:
+    1. imageio_ffmpeg bundled binary (always present in venv if imageio is installed)
+    2. Chocolatey-installed ffmpeg (C:\\ProgramData\\chocolatey\\lib\\ffmpeg\\...)
+    3. backend/bin/ffmpeg.exe (manually placed)
+    4. System PATH ffmpeg (shim or global install)
+    """
+    # 1. imageio_ffmpeg bundled binary
+    try:
+        import imageio_ffmpeg
+        ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+        if ffmpeg_bin and Path(ffmpeg_bin).exists():
+            logger.info("[ffmpeg] Using imageio_ffmpeg bundled binary: %s", ffmpeg_bin)
+            return ffmpeg_bin
+    except (ImportError, RuntimeError):
+        pass
+
+    # 2. Chocolatey ffmpeg install (choco install ffmpeg)
+    _choco_ffmpeg_dir = Path(r"C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin")
+    for candidate in (_choco_ffmpeg_dir / "ffmpeg.exe",):
+        if candidate.exists():
+            logger.info("[ffmpeg] Using chocolatey ffmpeg: %s", candidate)
+            return str(candidate)
+
+    # 3. backend/bin/ffmpeg.exe
+    _backend_bin = Path(__file__).parent.parent / "bin"
+    for candidate in (_backend_bin / "ffmpeg.exe", _backend_bin / "ffmpeg"):
+        if candidate.exists():
+            logger.info("[ffmpeg] Using backend/bin binary: %s", candidate)
+            return str(candidate)
+
+    # 4. System PATH (choco shim or global)
+    import shutil
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        logger.info("[ffmpeg] Using system PATH ffmpeg: %s", system_ffmpeg)
+        return system_ffmpeg
+
+    logger.warning("[ffmpeg] ffmpeg not found anywhere — Manim may fail")
+    return "ffmpeg"
+
+
+def _ensure_sox_available(proc_env: dict, tmpdir_path: Path) -> dict:
+    """Ensure sox is resolvable for manim-voiceover.
+
+    Strategy (in priority order):
+    1. System sox is already on PATH — do nothing.
+    2. backend/bin/sox.exe exists and is executable — add bin/ to PATH.
+    3. No sox anywhere — create a tiny Python wrapper script in tmpdir that
+       calls ffmpeg to convert audio. manim-voiceover only uses sox for
+       simple format conversion (mp3 → wav) so ffmpeg can substitute.
+    """
+    import shutil
+
+    # 1. Already available
+    if shutil.which("sox", path=proc_env.get("PATH", os.environ.get("PATH", ""))):
+        logger.info("[sox] Found sox on PATH — no action needed")
+        return proc_env
+
+    # 2. backend/bin/sox.exe
+    _bin_dir = Path(__file__).parent.parent / "bin"
+    _sox_bin = _bin_dir / "sox.exe"
+    if _sox_bin.exists():
+        proc_env = proc_env.copy()
+        proc_env["PATH"] = str(_bin_dir) + os.pathsep + proc_env.get("PATH", "")
+        logger.info("[sox] Using backend/bin/sox.exe")
+        return proc_env
+
+    # 3. Fallback: create a sox-shim bat that calls ffmpeg
+    # manim-voiceover calls sox like: sox input.mp3 -r 24000 output.wav
+    # ffmpeg equivalent: ffmpeg -y -i input.mp3 output.wav
+    ffmpeg_exe = _get_ffmpeg_path()
+    shim_lines = [
+        "@echo off",
+        "REM sox-shim: translates simple sox calls to ffmpeg",
+        "set INPUT=%~1",
+        "set OUTPUT=%~2",
+        f'"{ffmpeg_exe}" -y -i %INPUT% %OUTPUT% >nul 2>&1',
+    ]
+    sox_shim = tmpdir_path / "sox.bat"
+    sox_shim.write_text("\r\n".join(shim_lines) + "\r\n", encoding="utf-8")
+    proc_env = proc_env.copy()
+    proc_env["PATH"] = str(tmpdir_path) + os.pathsep + proc_env.get("PATH", "")
+    logger.warning("[sox] sox not found — using ffmpeg-based shim from %s", sox_shim)
+    return proc_env
 
 
 def extract_scene_name(code: str) -> str:
@@ -149,7 +242,33 @@ def _run_manim_subprocess(
 
         code_path = tmpdir_path / "scene.py"
         logger.info(f"{tag} Writing Manim code to {code_path.name}")
+
+        # Fix old flat manim_voiceover imports before rendering.
+        # The LLM may generate: from manim_voiceover.services import GTTSService
+        # but newer manim-voiceover requires: from manim_voiceover.services.gtts import GTTSService
+        _vo_fixes = [
+            (r"from manim_voiceover\.services import GTTSService",
+             "from manim_voiceover.services.gtts import GTTSService"),
+            (r"from manim_voiceover\.services import GoogleTTS\b",
+             "from manim_voiceover.services.gtts import GTTSService"),
+            (r"from manim_voiceover\.services import AzureService",
+             "from manim_voiceover.services.azure import AzureService"),
+            (r"from manim_voiceover\.services import ElevenLabsService",
+             "from manim_voiceover.services.elevenlabs import ElevenLabsService"),
+            (r"from manim_voiceover\.services import RecorderService",
+             "from manim_voiceover.services.recorder import RecorderService"),
+        ]
+        import re as _re2
+        for _pat, _rep in _vo_fixes:
+            code = _re2.sub(_pat, _rep, code)
+
+        # Also ensure GTTSService is imported if it's used but not imported at all
+        if "GTTSService" in code and not _re2.search(r"^\s*(from|import).*GTTSService", code, _re2.MULTILINE):
+            code = "from manim_voiceover.services.gtts import GTTSService\n" + code
+
+
         code_path.write_text(code, encoding="utf-8")
+
 
         # Override codec to mpeg4 so manim doesn't try libx264 (which hangs on
         # Python 3.14 / Windows with the LGPL ffmpeg build we ship).
@@ -179,14 +298,16 @@ def _run_manim_subprocess(
             f"--media_dir={output_dir}",
         ]
 
-        # Build subprocess environment: inject backend/bin at front of PATH
-        # so 'ffmpeg' resolves to our bundled binary.
+        # Build subprocess environment:
+        # - Put imageio_ffmpeg (or backend/bin) ffmpeg at front of PATH
+        # - Ensure sox is available (or shimmed with ffmpeg)
         proc_env = os.environ.copy()
-        if _ffmpeg_dir:
-            proc_env["PATH"] = _ffmpeg_dir + os.pathsep + proc_env.get("PATH", "")
-            logger.info("%s Using ffmpeg from %s", tag, _ffmpeg_dir)
-        else:
-            logger.warning("%s backend/bin/ffmpeg.exe not found; using PATH ffmpeg", tag)
+        ffmpeg_exe = _get_ffmpeg_path()
+        ffmpeg_dir = str(Path(ffmpeg_exe).parent) if ffmpeg_exe != "ffmpeg" else ""
+        if ffmpeg_dir:
+            proc_env["PATH"] = ffmpeg_dir + os.pathsep + proc_env.get("PATH", "")
+            logger.info("%s ffmpeg resolved to: %s", tag, ffmpeg_exe)
+        proc_env = _ensure_sox_available(proc_env, tmpdir_path)
 
         logger.info("%s Starting Manim render: %s (%s)", tag, scene_name, quality)
 
@@ -245,14 +366,14 @@ def _run_manim_subprocess(
             if timed_out:
                 logger.warning(
                     "%s Manim timed out (combine step hung). "
-                    "%d partial files -> PyAV stream-copy fallback.",
-                    tag, len(partial),
+                    "%d partial files -> PyAV stream-copy fallback.\nManim Log (if any):\n%s",
+                    tag, len(partial), manim_log[-1500:]
                 )
             else:
                 logger.warning(
                     "%s Manim exited %d (combine step crashed). "
-                    "%d partial files -> PyAV stream-copy fallback.",
-                    tag, returncode, len(partial),
+                    "%d partial files -> PyAV stream-copy fallback.\nManim Log:\n%s",
+                    tag, returncode, len(partial), manim_log[-1500:]
                 )
             combined = tmpdir_path / "combined.mp4"
             _combine_partial_movies_av(partial, combined)

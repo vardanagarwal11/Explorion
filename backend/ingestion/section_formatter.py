@@ -22,6 +22,59 @@ logger = logging.getLogger(__name__)
 MAX_SECTIONS = 5
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# NIM Llama 3.1 provider for text analysis
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def call_llm_nim(
+    prompt: str,
+    system_prompt: str = "",
+    max_tokens: int = 4096,
+    timeout_seconds: int = 60,
+) -> str:
+    """
+    Call NIM Llama 3.1 specifically for text analysis/summarization.
+    
+    This ensures section formatting uses Llama 3.1 (not GLM-5.1 which is for code).
+    """
+    import asyncio
+    import os
+    from openai import AsyncOpenAI
+    
+    nim_api_key = os.environ.get("NIM_API_KEY")
+    if not nim_api_key:
+        raise RuntimeError(
+            "NIM_API_KEY not set in .env. Section formatting requires NIM Llama 3.1."
+        )
+    
+    client = AsyncOpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=nim_api_key
+    )
+    
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    
+    try:
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model="meta/llama-3.1-70b-instruct",
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=0.2,
+            ),
+            timeout=timeout_seconds
+        )
+        return response.choices[0].message.content
+    except asyncio.TimeoutError:
+        raise TimeoutError(
+            f"NIM Llama 3.1 request timed out after {timeout_seconds}s. "
+            "This may indicate the API is slow or rate-limited."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pre-processing
 # ---------------------------------------------------------------------------
@@ -125,9 +178,8 @@ Full paper content:
 
     print(f"[FORMATTER] Phase 1: Summarizing paper ({total_words} words -> ~{target_words} words)...")
 
-    result = await call_llm(
+    result = await call_llm_nim(
         prompt=user_prompt,
-        model=model,
         system_prompt=system_prompt,
         max_tokens=16000,
     )
@@ -196,9 +248,8 @@ Summarized text to organize into sections:
     summary_words = len(summary_text.split())
     print(f"[FORMATTER] Phase 2: Organizing {summary_words} words into <={MAX_SECTIONS} sections...")
 
-    raw_response = await call_llm(
+    raw_response = await call_llm_nim(
         prompt=user_prompt,
-        model=model,
         system_prompt=system_prompt,
         max_tokens=16000,
     )
@@ -317,7 +368,7 @@ def _clean_display_text(text: str) -> str:
 async def format_sections(
     sections: list[Section],
     meta: ArxivPaperMeta,
-    model: str = "claude-sonnet-4-5-20250929",
+    model: str | None = None,
     max_concurrent: int = 5,
 ) -> list[Section]:
     """
@@ -330,7 +381,7 @@ async def format_sections(
     Args:
         sections: Sections from extract_sections()
         meta: Paper metadata for context
-        model: Claude model identifier (e.g. "claude-sonnet-4-5-20250929")
+        model: LLM model identifier. If None, uses NIM Llama 3.1 for text analysis
         max_concurrent: Max concurrent API calls
 
     Returns:
@@ -338,6 +389,9 @@ async def format_sections(
     """
     if not sections:
         return sections
+    
+    # Note: model parameter is kept for backwards compatibility but ignored
+    # Section formatting always uses NIM Llama 3.1 (not GLM-5.1 which is for code generation)
 
     print(f"\n[FORMATTER] === Summarize & Organize pipeline: {len(sections)} input sections ===")
     logger.info(f"Starting summarize & organize pipeline for {len(sections)} sections")
@@ -348,17 +402,17 @@ async def format_sections(
 
     # --- Phase 1: Holistic summarization ---
     try:
-        summary_text = await _summarize_paper(full_content, meta.title, total_words, model)
+        summary_text = await _summarize_paper(full_content, meta.title, total_words, "meta/llama-3.1-70b-instruct")
     except Exception as e:
         logger.error(f"Phase 1 (summarization) failed: {e}")
         print(f"[FORMATTER] Phase 1 FAILED ({type(e).__name__}: {e}), aborting pipeline")
         raise RuntimeError(
             "Section summarization failed. No paper content was stored to avoid raw-text fallback."
-        ) from e
+        )
 
     # --- Phase 2: Section organization ---
     try:
-        organized = await _organize_into_sections(summary_text, meta.title, model)
+        organized = await _organize_into_sections(summary_text, meta.title, "meta/llama-3.1-70b-instruct")
     except Exception as e:
         logger.error(f"Phase 2 (organization) failed: {e}")
         print(f"[FORMATTER] Phase 2 FAILED ({type(e).__name__}: {e}), using fallback split")

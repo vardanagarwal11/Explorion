@@ -2,24 +2,31 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, FileText, Github, Link as LinkIcon, Sparkles } from "lucide-react";
+import { Copy, FileText, Github, Link as LinkIcon, Sparkles, Coins, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { buildPaymentTransaction, PAPER_PRICE_SOL } from "@/lib/solana";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function UniversalInputForm() {
   const router = useRouter();
-  const [inputType, setInputType] = useState<"url" | "arxiv" | "github" | "text">("url");
+  const [inputType, setInputType] = useState<"url" | "arxiv" | "github" | "text" | "solana">("url");
   const [inputValue, setInputValue] = useState("");
   const [videoMode, setVideoMode] = useState("standard");
   const [narrationStyle, setNarrationStyle] = useState("educational");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const { connection } = useConnection();
+  const { publicKey, sendTransaction, connected } = useWallet();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +34,38 @@ export function UniversalInputForm() {
 
     setIsSubmitting(true);
     setError(null);
+    setPaymentStatus(null);
+
+    // Handle Solana payment if needed
+    let txSignature = "";
+    if (inputType === "solana") {
+      if (!connected || !publicKey) {
+        setError("Please connect your wallet first");
+        setIsSubmitting(false);
+        return;
+      }
+
+      try {
+        setPaymentStatus("Preparing transaction...");
+        const transaction = await buildPaymentTransaction(connection, publicKey);
+        
+        setPaymentStatus(`Confirming ${PAPER_PRICE_SOL} SOL payment...`);
+        txSignature = await sendTransaction(transaction, connection);
+        
+        setPaymentStatus("Verifying transaction on-chain...");
+        const latestBlockhash = await connection.getLatestBlockhash();
+        await connection.confirmTransaction({
+          signature: txSignature,
+          ...latestBlockhash
+        });
+        
+        setPaymentStatus("Payment confirmed!");
+      } catch (err: any) {
+        setError(`Payment failed: ${err.message || "Transaction rejected"}`);
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     const payload: Record<string, unknown> = {
       config: {
@@ -37,6 +76,8 @@ export function UniversalInputForm() {
       }
     };
 
+    // All input types route through /api/process/universal
+    // (the backend auto-detects content type from url, arxiv_id, or text)
     if (inputType === "url") payload.url = inputValue.trim();
     if (inputType === "arxiv") payload.arxiv_id = inputValue.trim();
     if (inputType === "github") {
@@ -44,11 +85,16 @@ export function UniversalInputForm() {
       payload.content_type = "github_repo";
     }
     if (inputType === "text") payload.text = inputValue.trim();
+    if (inputType === "solana") {
+      payload.text = inputValue.trim();
+      payload.content_type = "technical_content"; // Or a new type if backend supports it
+      //@ts-ignore
+      payload.payment_signature = txSignature;
+    }
 
     try {
-      const endpoint = inputType === "github" ? "/api/process/github" :
-        inputType === "text" ? "/api/process/content" :
-          "/api/process/universal";
+      // All types route through universal — backend auto-detects from url / arxiv_id / text
+      const endpoint = "/api/process/universal";
 
       const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
@@ -93,13 +139,13 @@ export function UniversalInputForm() {
               <LinkIcon className="w-3 h-3 mr-2" /> URL
             </TabsTrigger>
             <TabsTrigger value="arxiv" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/50 text-xs font-mono rounded-none">
-              <FileText className="w-3 h-3 mr-2" /> ArXiv
+              <FileText className="w-3 h-3 mr-2" /> Research
             </TabsTrigger>
             <TabsTrigger value="github" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/50 text-xs font-mono rounded-none">
               <Github className="w-3 h-3 mr-2" /> Repo
             </TabsTrigger>
-            <TabsTrigger value="text" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/50 text-xs font-mono rounded-none">
-              <Copy className="w-3 h-3 mr-2" /> Text
+            <TabsTrigger value="solana" className="data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/50 text-xs font-mono rounded-none">
+              <Coins className="w-3 h-3 mr-2" /> Strategy
             </TabsTrigger>
           </TabsList>
 
@@ -127,13 +173,27 @@ export function UniversalInputForm() {
               className="bg-black/50 border-white/20 focus-visible:ring-1 focus-visible:ring-yellow-400 focus-visible:border-yellow-400 transition-all duration-300 text-white font-mono rounded-none h-12"
             />
           </TabsContent>
-          <TabsContent value="text">
-            <Textarea
-              placeholder="Paste technical content or documentation here..."
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              className="bg-black/50 border-white/20 focus-visible:ring-1 focus-visible:ring-yellow-400 focus-visible:border-yellow-400 transition-all duration-300 text-white font-mono rounded-none min-h-[100px]"
-            />
+          <TabsContent value="solana">
+            <div className="space-y-4">
+              <Textarea
+                placeholder="Paste a wallet address, token, or on-chain strategy to visualize..."
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                className="bg-black/50 border-white/20 focus-visible:ring-1 focus-visible:ring-yellow-400 focus-visible:border-yellow-400 transition-all duration-300 text-white font-mono rounded-none min-h-[100px]"
+              />
+              <div className="flex items-center justify-between p-3 border border-white/10 bg-white/5">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-yellow-400" />
+                  <span className="text-[10px] font-mono text-white/60 tracking-wider">SOLANA.WALLET</span>
+                </div>
+                <div className="custom-wallet-button">
+                  <WalletMultiButton />
+                </div>
+              </div>
+              <p className="text-[9px] font-mono text-white/40 italic">
+                * Generation cost: {PAPER_PRICE_SOL} SOL. Secured by Solana.
+              </p>
+            </div>
           </TabsContent>
         </Tabs>
 
@@ -159,13 +219,21 @@ export function UniversalInputForm() {
               </SelectTrigger>
               <SelectContent className="bg-black border-white/20 text-white font-mono rounded-none">
                 <SelectItem value="educational">Educational</SelectItem>
-                <SelectItem value="teacher">Teacher (Slow)</SelectItem>
+                <SelectItem value="teacher">Teacher (Detailed)</SelectItem>
+                <SelectItem value="quick_summary">Quick Summary</SelectItem>
                 <SelectItem value="youtube">YouTube Explainer</SelectItem>
                 <SelectItem value="podcast">Podcast</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
+
+        {paymentStatus && !error && (
+          <div className="border border-yellow-400/30 bg-yellow-400/10 p-3 text-yellow-400 text-xs font-mono flex items-start gap-2">
+            <span className="shrink-0 mt-0.5 animate-pulse">●</span>
+            <span>{paymentStatus}</span>
+          </div>
+        )}
 
         {error && (
           <div className="border border-red-500/30 bg-red-500/10 p-3 text-red-400 text-xs font-mono flex items-start gap-2">

@@ -99,7 +99,9 @@ class SpatialValidator:
         needs_regen = (
             len(bounds_issues) >= 2 or  # Multiple off-screen elements
             len(overlap_issues) >= 2 or  # Multiple overlaps
-            any("critical" in issue.issue.lower() for issue in bounds_issues)
+            any("critical" in issue.issue.lower() for issue in bounds_issues) or
+            any("critical" in issue.issue.lower() for issue in spacing_issues) or
+            any("critical" in issue.issue.lower() for issue in overlap_issues)
         )
         
         return SpatialValidatorOutput(
@@ -296,6 +298,17 @@ class SpatialValidator:
                         issue=f"Elements '{pos1.element_name}' and '{pos2.element_name}' are at similar y-position ({pos1.y_position:.1f}), may overlap horizontally",
                         suggested_fix=f"Use arrange() or add horizontal spacing: {pos2.element_name}.next_to({pos1.element_name}, RIGHT, buff=0.5)"
                     ))
+                    
+        # Add critical fallback for large blocks of text/equations
+        if len(positions) > 3 and "VGroup" not in code and "next_to" not in code:
+            issues.append(OverlapIssue(
+                element1="Multiple Elements",
+                element2="Screen",
+                line1=0,
+                line2=0,
+                issue="CRITICAL: Multiple elements placed using absolute coordinates without VGroup or next_to(). Overlap is highly likely.",
+                suggested_fix="Wrap your elements in a VGroup and use group.arrange(DOWN, buff=0.5)"
+            ))
         
         return issues
     
@@ -332,6 +345,44 @@ class SpatialValidator:
                     issue="Large downward shift (DOWN * 3+) may push element to bottom of screen",
                     suggested_fix="Use to_edge(DOWN, buff=0.5) or next_to() for safer positioning"
                 ))
+        
+        # Stricter checks for layout missing
+        shift_count = len(re.findall(r"\.shift\(", code))
+        if shift_count >= 3 and "VGroup" not in code:
+            issues.append(SpacingIssue(
+                line_number=0,
+                issue="CRITICAL: Multiple independent .shift() calls detected without VGroup.",
+                suggested_fix="Group elements using VGroup(*elements).arrange(DOWN, buff=0.5) to avoid overlapping."
+            ))
+            
+        if "scale(" not in code and ("MathTex" in code or "Tex(" in code):
+            issues.append(SpacingIssue(
+                line_number=0,
+                issue="CRITICAL: No .scale() calls detected, but equations/text are present.",
+                suggested_fix="Add .scale(0.7) or .scale(0.8) to your large equations to ensure they fit on the canvas."
+            ))
+
+        # Check for oversized font sizes (>40 is too large for the canvas)
+        large_fonts = re.findall(r"font_size\s*=\s*(\d+)", code)
+        for fs_str in large_fonts:
+            fs = int(fs_str)
+            if fs > 40:
+                issues.append(SpacingIssue(
+                    line_number=0,
+                    issue=f"CRITICAL: font_size={fs} is too large and will overflow the canvas.",
+                    suggested_fix="Cap font sizes: titles at 36, body text at 20, labels inside shapes at 16."
+                ))
+                break  # one warning is enough
+
+        # Check multi-beat scenes that never clear the canvas
+        beat_count = len(re.findall(r"#\s*Beat\s*\d+", code, re.IGNORECASE))
+        has_fadeout_clear = "FadeOut(*self.mobjects)" in code
+        if beat_count >= 3 and not has_fadeout_clear:
+            issues.append(SpacingIssue(
+                line_number=0,
+                issue="CRITICAL: Scene has 3+ beats but never clears the canvas. Old elements pile up and cause overlaps.",
+                suggested_fix="Add `self.play(FadeOut(*self.mobjects))` at the start of each major beat (Beat 2 onwards)."
+            ))
         
         return issues
     

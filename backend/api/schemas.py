@@ -129,6 +129,10 @@ class UniversalProcessRequest(BaseModel):
         default_factory=ProcessingConfigSchema,
         description="Processing configuration (video mode, narration, etc.)"
     )
+    payment_signature: Optional[str] = Field(
+        None,
+        description="Solana transaction signature for payment verification"
+    )
 
 
 class GitHubProcessRequest(BaseModel):

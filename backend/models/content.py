@@ -59,20 +59,20 @@ class TTSProvider(str, Enum):
 VIDEO_MODE_CONFIG = {
     VideoMode.QUICK: {
         "max_visualizations": 3,
-        "duration_range": (15, 30),   # seconds per visualization
-        "max_scenes_per_viz": 4,
+        "duration_range": (30, 50),   # seconds per visualization
+        "max_scenes_per_viz": 5,
         "description": "2-3 minute quick overview",
     },
     VideoMode.STANDARD: {
         "max_visualizations": 5,
-        "duration_range": (30, 45),
-        "max_scenes_per_viz": 6,
+        "duration_range": (45, 90),   # MINIMUM 45s per visualization
+        "max_scenes_per_viz": 8,
         "description": "5-8 minute standard explanation",
     },
     VideoMode.DEEP_DIVE: {
         "max_visualizations": 10,
-        "duration_range": (45, 90),
-        "max_scenes_per_viz": 10,
+        "duration_range": (60, 120),  # 1-2 minutes per visualization
+        "max_scenes_per_viz": 12,
         "description": "10-20 minute comprehensive walkthrough",
     },
 }

@@ -3,6 +3,8 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "@solana/wallet-adapter-react-ui/styles.css";
+import { SolanaProvider } from "@/components/SolanaProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,126 +19,78 @@ const geistMono = Geist_Mono({
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  name: "arXivisual",
+  name: "Explorion",
   alternateName: [
-    "arxivisuals",
-    "arxiv visual",
-    "arxiv visuals",
-    "arXivisuals",
+    "explorion",
+    "explorion ai",
+    "explorion visuals",
   ],
-  url: "https://arxivisual.org",
+  url: "https://explorion.ai",
   applicationCategory: "EducationalApplication",
   operatingSystem: "Web",
   description:
-    "arXivisual transforms arXiv research papers into interactive scrollytelling experiences with Manim-generated animated visualizations. Built by Armaan Gupta, Nikhil Hooda, Raj Shah, and Ajith Bondili.",
-  author: [
-    {
-      "@type": "Person",
-      name: "Armaan Gupta",
-      sameAs: "https://x.com/armaangupt0",
-    },
-    {
-      "@type": "Person",
-      name: "Nikhil Hooda",
-      sameAs: "https://x.com/_nikhilhooda",
-    },
-    { "@type": "Person", name: "Raj Shah", sameAs: "https://x.com/_rajshah6" },
-    {
-      "@type": "Person",
-      name: "Ajith Bondili",
-      sameAs: "https://x.com/AjithBondili",
-    },
-  ],
-  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-  keywords:
-    "arXiv, arXivisual, arXivisuals, arxiv visual, arxiv visuals, research paper visualizer, Manim, scrollytelling, AI, machine learning",
+    "Explorion transforms complex technical strategies and research papers into interactive cinematic explainers with AI-generated visualizations.",
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://arxivisual.org"),
+  metadataBase: new URL("https://explorion.tech"),
   title: {
-    default: "arXivisual — arXiv Papers, Visualized",
-    template: "%s · arXivisual",
+    default: "Explorion — Decode the Complex",
+    template: "%s · Explorion",
   },
   description:
-    "arXivisual transforms any arXiv research paper into an interactive scrollytelling experience with AI-generated Manim animations. Paste an arXiv URL and watch complex papers come to life.",
-  applicationName: "arXivisual",
+    "Explorion transforms any technical paper, strategy, or repo into an interactive cinematic explainer with AI-generated Manim animations. Paste a URL or strategy and watch concepts come to life.",
+  applicationName: "Explorion",
   keywords: [
-    "arXivisual",
-    "arXivisuals",
-    "arxiv visual",
-    "arxiv visuals",
-    "arXiv",
-    "arXiv paper visualizer",
-    "research paper explainer",
+    "Explorion",
+    "explorion ai",
+    "technical explainer",
+    "research paper visualizer",
     "Manim animations",
     "AI paper summary",
+    "cinematic explanations",
     "scrollytelling",
     "machine learning visualization",
-    "academic paper visualization",
-    "computer science",
-    "AI research",
-    "3Blue1Brown style",
-    "Armaan Gupta",
-    "Nikhil Hooda",
-    "Raj Shah",
-    "Ajith Bondili",
-    "interactive research",
-    "paper to video",
+    "Solana",
+    "web3 strategy",
   ],
-  authors: [
-    { name: "Armaan Gupta", url: "https://x.com/armaangupt0" },
-    { name: "Nikhil Hooda", url: "https://x.com/_nikhilhooda" },
-    { name: "Raj Shah", url: "https://x.com/_rajshah6" },
-    { name: "Ajith Bondili", url: "https://x.com/AjithBondili" },
-  ],
-  creator: "Armaan Gupta, Nikhil Hooda, Raj Shah, Ajith Bondili",
   openGraph: {
     type: "website",
-    url: "https://arxivisual.org",
-    siteName: "arXivisual",
-    title: "arXivisual — arXiv Papers, Visualized",
+    url: "https://explorion.ai",
+    siteName: "Explorion",
+    title: "Explorion — Decode the Complex",
     description:
-      "Transform any arXiv paper into an interactive scrollytelling experience with AI-generated Manim animations. One edit: arxiv → arxivisual.",
+      "Transform any technical content into an interactive cinematic explainer with AI-generated Manim animations.",
     images: [
       {
-        url: "/landing.jpeg",
+        url: "/logo.png",
         width: 1200,
         height: 630,
-        alt: "arXivisual — arXiv papers transformed into animated visual explanations",
+        alt: "Explorion — Cinematic Visual Explanations",
       },
     ],
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    site: "@armaangupt0",
-    creator: "@armaangupt0",
-    title: "arXivisual — arXiv Papers, Visualized",
+    title: "Explorion — Decode the Complex",
     description:
-      "Transform any arXiv paper into an interactive scrollytelling experience with AI-generated Manim animations.",
-    images: ["/landing.jpeg"],
+      "Transform any technical content into an interactive cinematic explainer with AI-generated Manim animations.",
+    images: ["/logo.png"],
   },
   icons: {
     icon: [
-      { url: "/icon.png", type: "image/png" },
-      { url: "/icon.png", sizes: "any" },
+      { url: "/logo.png", type: "image/png" },
+      { url: "/logo.png", sizes: "any" },
     ],
-    apple: [{ url: "/icon.png", type: "image/png" }],
+    apple: [{ url: "/logo.png", type: "image/png" }],
   },
   alternates: {
-    canonical: "https://arxivisual.org",
+    canonical: "https://explorion.ai",
   },
   robots: {
     index: true,
     follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      "max-video-preview": -1,
-      "max-image-preview": "large",
-      "max-snippet": -1,
-    },
   },
 };
 
@@ -156,7 +110,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-dvh bg-black text-[#e8e8e8]`}
       >
-        <div className="min-h-dvh">{children}</div>
+        <SolanaProvider>
+          <div className="min-h-dvh">{children}</div>
+        </SolanaProvider>
         <Analytics />
         <SpeedInsights />
       </body>

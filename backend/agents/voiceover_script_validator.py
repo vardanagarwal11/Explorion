@@ -8,7 +8,7 @@ from typing import Optional
 
 # Handle imports for both package and direct execution
 try:
-    from .base import call_llm_sync, get_model_name
+    from .base import call_llm, get_model_name
     from ..models.generation import GeneratedCode, VisualizationCandidate, VisualizationPlan
     from ..models.voiceover import VoiceoverValidationOutput
 except ImportError:
@@ -16,7 +16,7 @@ except ImportError:
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from agents.base import call_llm_sync, get_model_name
+    from agents.base import call_llm, get_model_name
     from models.generation import GeneratedCode, VisualizationCandidate, VisualizationPlan
     from models.voiceover import VoiceoverValidationOutput
 
@@ -49,7 +49,7 @@ class VoiceoverScriptValidator:
         self.use_llm_judge = use_llm_judge
         self.model = get_model_name(model)
 
-    def validate(
+    async def validate(
         self,
         generated_code: GeneratedCode,
         plan: VisualizationPlan,
@@ -111,7 +111,7 @@ class VoiceoverScriptValidator:
         llm_educational = None
         llm_issue = None
         if self.use_llm_judge and narrations:
-            llm_alignment, llm_educational, llm_issue = self._llm_judge(
+            llm_alignment, llm_educational, llm_issue = await self._llm_judge(
                 candidate=candidate,
                 plan=plan,
                 narrations=narrations,
@@ -194,7 +194,7 @@ class VoiceoverScriptValidator:
             return token[:-1]
         return token
 
-    def _llm_judge(
+    async def _llm_judge(
         self,
         candidate: VisualizationCandidate,
         plan: VisualizationPlan,
@@ -218,11 +218,12 @@ class VoiceoverScriptValidator:
                 "- issues: short list of concrete problems\n"
             )
 
-            text = call_llm_sync(
+            text = await call_llm(
                 prompt=prompt,
                 model=self.model,
                 max_tokens=512,
-            ).strip()
+            )
+            text = text.strip()
             match = re.search(r"```json\s*([\s\S]*?)\s*```", text)
             payload = match.group(1).strip() if match else text
             result = json.loads(payload)

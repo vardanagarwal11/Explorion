@@ -99,6 +99,10 @@ class CodeValidator:
         # Step 4: Check construct method
         if not self._has_construct_method(fixed_code):
             issues_found.append("No construct method found (`def construct(self):`)")
+            
+        # Step 4.5: Check for self.play
+        if not self._has_play_call(fixed_code):
+            issues_found.append("No `self.play(...)` calls found! A scene must have at least one animation to generate an mp4.")
         
         # Step 5: Check for common typos in Manim objects
         typo_fixes = self._fix_common_typos(fixed_code)
@@ -110,6 +114,20 @@ class CodeValidator:
         mathtex_issues = self._check_mathtex_splitting(fixed_code)
         if mathtex_issues:
             issues_found.extend(mathtex_issues)
+            
+        # Step 7: Forbid external assets
+        if "ImageMobject" in fixed_code or "SVGMobject" in fixed_code:
+            issues_found.append("CRITICAL: Do NOT use ImageMobject or SVGMobject. No external images or SVGs are available. Draw shapes manually using Manim primitives.")
+
+        # Step 8: Enforce font_size cap (>40 overflows the canvas)
+        import re as _re
+        large_fonts = _re.findall(r"font_size\s*=\s*(\d+)", fixed_code)
+        for fs_str in large_fonts:
+            if int(fs_str) > 40:
+                issues_found.append(
+                    f"CRITICAL: font_size={fs_str} is too large. Cap font sizes: titles ≤ 36, body ≤ 20, shape labels ≤ 16."
+                )
+                break
         
         # Determine if regeneration is needed
         # More than 1 unfixed issue OR MathTex issues = regenerate
@@ -144,6 +162,10 @@ class CodeValidator:
     def _has_construct_method(self, code: str) -> bool:
         """Check if code has a construct method."""
         return "def construct(self)" in code
+        
+    def _has_play_call(self, code: str) -> bool:
+        """Check if code has a self.play(...) call."""
+        return "self.play(" in code
     
     def _attempt_syntax_fixes(self, code: str) -> tuple[str, list[str]]:
         """

@@ -57,12 +57,7 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
     const [error, setError] = useState("");
     const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
-    // Resolve relative URLs (like /api/video/xxx) to absolute with backend host
-    const resolveUrl = (url: string | undefined | null): string | undefined => {
-        if (!url) return undefined;
-        if (url.startsWith("http://") || url.startsWith("https://")) return url;
-        return `${API_URL}${url}`;
-    };
+    // (URL resolution handled in the fetch effect below)
 
     useEffect(() => {
         fetch(`${API_URL}/api/paper/${unwrappedParams.content_id}`)
@@ -71,21 +66,26 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                 return res.json();
             })
             .then(json => {
-                // Resolve all media URLs to absolute paths
+                // Resolve all media URLs from relative to absolute (e.g. /api/video/xxx → http://...)
+                const resolveMedia = (url: string | undefined | null) => {
+                    if (!url) return undefined;
+                    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+                    return `${API_URL}${url}`;
+                };
                 if (json.sections) {
                     json.sections = json.sections.map((s: Section) => ({
                         ...s,
-                        video_url: resolveUrl(s.video_url),
-                        subtitle_url: resolveUrl(s.subtitle_url),
-                        audio_url: resolveUrl(s.audio_url),
+                        video_url: resolveMedia(s.video_url),
+                        subtitle_url: resolveMedia(s.subtitle_url),
+                        audio_url: resolveMedia(s.audio_url),
                     }));
                 }
                 if (json.visualizations) {
                     json.visualizations = json.visualizations.map((v: Visualization) => ({
                         ...v,
-                        video_url: resolveUrl(v.video_url),
-                        subtitle_url: resolveUrl(v.subtitle_url),
-                        audio_url: resolveUrl(v.audio_url),
+                        video_url: resolveMedia(v.video_url),
+                        subtitle_url: resolveMedia(v.subtitle_url),
+                        audio_url: resolveMedia(v.audio_url),
                     }));
                 }
                 setData(json);
@@ -121,18 +121,38 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
     const contentMeta = CONTENT_TYPE_LABELS[data.content_type || "research_paper"] || CONTENT_TYPE_LABELS.research_paper;
     const ContentIcon = contentMeta.icon;
 
-    // Resolve video & subtitle URLs
-    const currentVideoUrl = activeSection?.video_url || finalFullVideo?.video_url;
-    const currentSubtitleUrl = activeSection?.subtitle_url || finalFullVideo?.subtitle_url;
-    const currentAudioUrl = activeSection?.audio_url || finalFullVideo?.audio_url;
+    // Priority: section.video_url → any complete viz for this section → first viz with any url → full stitched video
+    const vizForSection = data.visualizations?.filter(
+        v => v.section_id === activeSectionId && v.video_url
+    );
+    const completeVizForSection = vizForSection?.find(v => v.status === "complete");
+    const currentVideoUrl =
+        activeSection?.video_url ||
+        completeVizForSection?.video_url ||
+        (vizForSection && vizForSection.length > 0 ? vizForSection[0].video_url : undefined) ||
+        finalFullVideo?.video_url;
+    const currentSubtitleUrl =
+        activeSection?.subtitle_url ||
+        completeVizForSection?.subtitle_url ||
+        finalFullVideo?.subtitle_url;
+    const currentAudioUrl =
+        activeSection?.audio_url ||
+        completeVizForSection?.audio_url ||
+        finalFullVideo?.audio_url;
 
     return (
         <div className="min-h-screen bg-black text-white/80 font-mono flex flex-col lg:h-screen lg:overflow-hidden">
             {/* Top Banner */}
             <div className="h-16 border-b border-white/10 flex items-center px-4 md:px-8 shrink-0 relative bg-black/60 backdrop-blur-lg z-20">
-                <Link href="/" className="mr-6 opacity-60 hover:opacity-100 transition-opacity">
+                <Link href="/" className="mr-4 opacity-60 hover:opacity-100 transition-opacity">
                     <ArrowLeft className="w-5 h-5" />
                 </Link>
+                <div className="flex items-center gap-2 mr-6 border-r border-white/10 pr-6 h-8">
+                    <img src="/logo.png" alt="Explorion" className="w-6 h-6 object-contain" />
+                    <span className="font-mono text-white text-sm font-bold tracking-widest italic transform -skew-x-12 hidden sm:inline">
+                        EXPLORION
+                    </span>
+                </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                         <h1 className="text-sm md:text-base font-bold truncate text-white">{data.title}</h1>
@@ -226,7 +246,13 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                         <TabsContent value="sections" className="flex-1 overflow-hidden m-0 p-0 border-none outline-none">
                             <ScrollArea className="h-full w-full">
                                 <div className="space-y-[1px] bg-white/5 pb-10">
-                                    {data.sections.map((sec, idx) => (
+                                    {data.sections.map((sec, idx) => {
+                                        const sectionViz = data.visualizations?.find(
+                                            v => v.section_id === sec.id && v.video_url
+                                        );
+                                        const hasVideo = !!(sec.video_url || sectionViz?.video_url);
+                                        const hasAudio = !!(sec.audio_url || sectionViz?.audio_url);
+                                        return (
                                         <div
                                             key={sec.id}
                                             onClick={() => setActiveSectionId(sec.id)}
@@ -241,19 +267,20 @@ export default function ResultPage({ params }: { params: Promise<{ content_id: s
                                             </p>
 
                                             <div className="flex gap-2 mt-3">
-                                                {sec.video_url && (
+                                                {hasVideo && (
                                                     <span className="inline-flex items-center gap-1.5 text-[9px] bg-white/10 px-2 py-0.5 rounded text-white/80 uppercase">
                                                         <PlayCircle className="w-3 h-3" /> Visualized
                                                     </span>
                                                 )}
-                                                {sec.audio_url && (
+                                                {hasAudio && (
                                                     <span className="inline-flex items-center gap-1.5 text-[9px] bg-white/10 px-2 py-0.5 rounded text-white/80 uppercase">
                                                         <Volume2 className="w-3 h-3" /> Audio
                                                     </span>
                                                 )}
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </ScrollArea>
                         </TabsContent>

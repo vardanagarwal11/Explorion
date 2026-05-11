@@ -48,7 +48,7 @@ class VoiceoverOutput(BaseModel):
 
 
 class VoiceoverGenerator(BaseAgent):
-    """
+    """Generates voiceover scripts using NIM Llama 3.1 for text generation.
     Generates voiceover scripts and transforms Manim code to include narration.
     
     The agent:
@@ -82,7 +82,9 @@ class VoiceoverGenerator(BaseAgent):
             tts_service: TTS service to use (gtts)
             voice_name: Unused, kept for interface compatibility
         """
-        super().__init__(prompt_file="voiceover_generator.md", model=model)
+        # Use NIM Llama 3.1 for text generation (not GLM-5.1 which is for code)
+        nim_model = "meta/llama-3.1-70b-instruct"
+        super().__init__(prompt_file="voiceover_generator.md", model=model or nim_model)
         self.tts_service = tts_service
         self.voice_name = voice_name
     

@@ -115,12 +115,59 @@ class RenderTester:
                 fix_suggestion=self.ERROR_FIXES.get(type(e).__name__, "Review the error and fix accordingly")
             )
     
+    def _normalize_voiceover_imports(self, code: str) -> str:
+        """Rewrite old flat manim_voiceover import paths to current sub-module paths."""
+        import re as _re
+        fixes = [
+            (r"from manim_voiceover\.services import GTTSService",
+             "from manim_voiceover.services.gtts import GTTSService"),
+            (r"from manim_voiceover\.services import GoogleTTS",
+             "from manim_voiceover.services.gtts import GTTSService"),
+            (r"from manim_voiceover\.services import AzureService",
+             "from manim_voiceover.services.azure import AzureService"),
+            (r"from manim_voiceover\.services import ElevenLabsService",
+             "from manim_voiceover.services.elevenlabs import ElevenLabsService"),
+            (r"from manim_voiceover\.services import RecorderService",
+             "from manim_voiceover.services.recorder import RecorderService"),
+        ]
+        for pattern, replacement in fixes:
+            code = _re.sub(pattern, replacement, code)
+        return code
+
+
     def _validate_by_import(self, code: str) -> RenderTestOutput:
         """
         Validate code by attempting to import it as a Python module.
-        
+
         This catches most runtime errors without actually rendering video.
         """
+        # Ensure all audio/video tool paths are on PATH during the import test.
+        # Priority: choco shims → backend/bin → existing PATH
+        _choco_bin   = r"C:\ProgramData\chocolatey\bin"       # ffmpeg / sox.portable shim
+        _choco_ffmpeg = r"C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin"
+        _backend_bin = str(Path(__file__).parent.parent / "bin")
+        _extra_dirs  = [_choco_ffmpeg, _choco_bin, _backend_bin]
+
+        current_path = os.environ.get("PATH", "")
+        for d in reversed(_extra_dirs):          # reversed so first entry wins
+            if d not in current_path:
+                current_path = d + os.pathsep + current_path
+        os.environ["PATH"] = current_path
+
+        # Also try to resolve ffmpeg via imageio_ffmpeg and add its dir
+        try:
+            import imageio_ffmpeg
+            _iio_ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            if _iio_ffmpeg:
+                _iio_dir = str(Path(_iio_ffmpeg).parent)
+                if _iio_dir not in os.environ["PATH"]:
+                    os.environ["PATH"] = _iio_dir + os.pathsep + os.environ["PATH"]
+        except (ImportError, RuntimeError):
+            pass
+
+        # Normalize old voiceover import paths before testing
+        code = self._normalize_voiceover_imports(code)
+
         # Create a temporary file
         with tempfile.NamedTemporaryFile(
             mode='w',

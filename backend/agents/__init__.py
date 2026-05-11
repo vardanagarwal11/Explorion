@@ -1,12 +1,13 @@
 """
-ArXiviz Agent Pipeline - Team 2
+ArXiviz Agent Pipeline
 
-This module provides the multi-agent AI pipeline for generating Manim visualizations
-from structured academic papers.
+Multi-agent AI pipeline for generating Manim visualizations
+from structured academic papers / repos / technical content.
 
-Sponsor Integrations:
-    - Dedalus: Multi-model handoffs via DedalusBaseAgent (Best Use of Dedalus API prize!)
-    - Context7: Live Manim documentation via MCP
+LLM routing (first key in .env wins):
+    NIM_API_KEY      → NVIDIA NIM  (meta/llama-3.1-70b-instruct)
+    GROQ_API_KEY     → Groq Cloud  (llama-3.3-70b-versatile)
+    GEMINI_API_KEY   → Google Gemini (gemini-1.5-pro)
 
 Usage:
     from agents import generate_visualizations
@@ -14,70 +15,43 @@ Usage:
 
     paper = StructuredPaper(...)
     visualizations = await generate_visualizations(paper)
-
-Dedalus Handoffs Usage:
-    from agents import DedalusBaseAgent, CodeAgent
-    
-    # Extend DedalusBaseAgent for multi-model handoffs
-    class MyAgent(DedalusBaseAgent):
-        def __init__(self):
-            super().__init__(prompt_file="my_prompt.md", task_type="code")
-    
-    # Or use convenience classes
-    agent = CodeAgent(prompt_file="code_gen.md")  # Claude + Codex handoff
 """
 
 try:
-    from .base import BaseAgent
-    from .dedalus_base import (
-        DedalusBaseAgent,
-        ResearchAgent,
-        CodeAgent,
-        CreativeAgent,
-        AnalysisAgent,
-    )
+    from .base import BaseAgent, get_provider, get_model_name, call_llm
     from .section_analyzer import SectionAnalyzer
     from .visualization_planner import VisualizationPlanner
     from .manim_generator import ManimGenerator
     from .code_validator import CodeValidator
     from .voiceover_script_validator import VoiceoverScriptValidator
-    from .context7_docs import get_manim_docs, clear_docs_cache
-    from .pipeline import generate_visualizations, generate_universal_visualizations, generate_single_visualization
-except ImportError:
-    from base import BaseAgent
-    from dedalus_base import (
-        DedalusBaseAgent,
-        ResearchAgent,
-        CodeAgent,
-        CreativeAgent,
-        AnalysisAgent,
+    from .pipeline import (
+        generate_visualizations,
+        generate_universal_visualizations,
+        generate_single_visualization,
     )
-    from section_analyzer import SectionAnalyzer
-    from visualization_planner import VisualizationPlanner
-    from manim_generator import ManimGenerator
-    from code_validator import CodeValidator
-    from voiceover_script_validator import VoiceoverScriptValidator
-    from context7_docs import get_manim_docs, clear_docs_cache
-    from pipeline import generate_visualizations, generate_universal_visualizations, generate_single_visualization
+except ImportError:
+    from agents.base import BaseAgent, get_provider, get_model_name, call_llm
+    from agents.section_analyzer import SectionAnalyzer
+    from agents.visualization_planner import VisualizationPlanner
+    from agents.manim_generator import ManimGenerator
+    from agents.code_validator import CodeValidator
+    from agents.voiceover_script_validator import VoiceoverScriptValidator
+    from agents.pipeline import (
+        generate_visualizations,
+        generate_universal_visualizations,
+        generate_single_visualization,
+    )
 
 __all__ = [
-    # Base agents
     "BaseAgent",
-    "DedalusBaseAgent",
-    # Dedalus convenience classes (multi-model handoffs)
-    "ResearchAgent",
-    "CodeAgent", 
-    "CreativeAgent",
-    "AnalysisAgent",
-    # Pipeline agents
+    "get_provider",
+    "get_model_name",
+    "call_llm",
     "SectionAnalyzer",
     "VisualizationPlanner",
     "ManimGenerator",
     "CodeValidator",
     "VoiceoverScriptValidator",
-    # Utilities
-    "get_manim_docs",
-    "clear_docs_cache",
     "generate_visualizations",
     "generate_universal_visualizations",
     "generate_single_visualization",

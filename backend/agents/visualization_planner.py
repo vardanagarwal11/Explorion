@@ -42,6 +42,12 @@ class VisualizationPlanner(BaseAgent):
     
     def __init__(self, model: str | None = None):
         super().__init__("visualization_planner.md", model=model)
+
+    def _trim_section_content(self, full_section_content: str, max_chars: int = 1800) -> str:
+        """Trim section content so planner prompts stay under provider token limits."""
+        if len(full_section_content) <= max_chars:
+            return full_section_content
+        return full_section_content[:max_chars] + "\n\n[content truncated to fit planning prompt]"
     
     async def run(
         self,
@@ -75,7 +81,7 @@ class VisualizationPlanner(BaseAgent):
             visualization_type=candidate.visualization_type.value,
             content_type=content_type,
             context=candidate.context,
-            section_content=full_section_content,
+            section_content=self._trim_section_content(full_section_content),
             content_context=ctx,
             target_min_duration=target_duration[0],
             target_max_duration=target_duration[1],
@@ -139,7 +145,7 @@ class VisualizationPlanner(BaseAgent):
             visualization_type=candidate.visualization_type.value,
             content_type=content_type,
             context=candidate.context,
-            section_content=full_section_content,
+            section_content=self._trim_section_content(full_section_content),
             content_context=ctx,
             target_min_duration=target_duration[0],
             target_max_duration=target_duration[1],

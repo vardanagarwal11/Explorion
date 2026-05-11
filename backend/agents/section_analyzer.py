@@ -36,6 +36,13 @@ class SectionAnalyzer(BaseAgent):
     
     def __init__(self, model: str | None = None):
         super().__init__("section_analyzer.md", model=model)
+
+    def _format_section_content(self, section: Section, max_chars: int = 1800) -> str:
+        """Trim section content so the analyzer prompt stays within provider limits."""
+        content = section.content or ""
+        if len(content) <= max_chars:
+            return content
+        return content[:max_chars] + "\n\n[content truncated to fit analysis prompt]"
     
     def _format_equations(self, section: Section) -> str:
         """Format equations for the prompt."""
@@ -99,7 +106,7 @@ class SectionAnalyzer(BaseAgent):
             content_type=content_type,
             section_id=section.id,
             section_title=section.title,
-            section_content=section.content,
+            section_content=self._format_section_content(section),
             equations=self._format_equations(section),
             code_blocks=self._format_code_blocks(section),
         )
@@ -157,7 +164,7 @@ class SectionAnalyzer(BaseAgent):
             content_type=content_type,
             section_id=section.id,
             section_title=section.title,
-            section_content=section.content,
+            section_content=self._format_section_content(section),
             equations=self._format_equations(section),
             code_blocks=self._format_code_blocks(section),
         )
@@ -166,3 +173,72 @@ class SectionAnalyzer(BaseAgent):
 
         result = self._parse_json_response(text)
         return self._parse_result(result, section.id)
+        
+    async def run_batch(
+        self,
+        content_title: str,
+        content_description: str,
+        sections: list[Section],
+        content_type: str = "research_paper",
+        max_candidates: int = 5,
+    ) -> list[VisualizationCandidate]:
+        """
+        Analyze all sections of a document in a single batch call.
+        """
+        # Format the overview of all sections
+        sections_overview = []
+        for i, sec in enumerate(sections):
+            content_snippet = self._format_section_content(sec, max_chars=400)
+            sections_overview.append(
+                f"### Section ID: {sec.id}\n"
+                f"**Title**: {sec.title}\n"
+                f"**Summary/Content Snippet**: {content_snippet}\n"
+            )
+        
+        document_sections = "\n".join(sections_overview)
+        
+        # We need to temporarily use a different prompt template for the batch
+        batch_prompt_template = self._load_prompt("batch_analyzer.md")
+        original_prompt_template = self.prompt_template
+        self.prompt_template = batch_prompt_template
+        
+        try:
+            prompt = self._format_prompt(
+                content_title=content_title,
+                content_description=content_description,
+                content_type=content_type,
+                document_sections=document_sections,
+                max_candidates=max_candidates,
+            )
+            
+            text = await self._call_llm(prompt)
+            result = self._parse_json_response(text)
+            
+            candidates = []
+            for candidate_data in result.get("candidates", []):
+                viz_type_str = candidate_data.get("visualization_type", "equation")
+                try:
+                    viz_type = VisualizationType(viz_type_str)
+                except ValueError:
+                    viz_type = VisualizationType.EQUATION
+                
+                sec_id = candidate_data.get("section_id", "")
+                if not sec_id and sections:
+                    sec_id = sections[0].id
+                    
+                candidate = VisualizationCandidate(
+                    section_id=sec_id,
+                    concept_name=candidate_data.get("concept_name", "Unknown Concept"),
+                    concept_description=candidate_data.get("concept_description", ""),
+                    visualization_type=viz_type,
+                    priority=min(5, max(1, candidate_data.get("priority", 3))),
+                    context=candidate_data.get("context", ""),
+                )
+                candidates.append(candidate)
+            
+            # Sort by priority
+            candidates.sort(key=lambda x: x.priority, reverse=True)
+            return candidates[:max_candidates]
+            
+        finally:
+            self.prompt_template = original_prompt_template

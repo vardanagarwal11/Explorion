@@ -74,8 +74,8 @@ logger = logging.getLogger(__name__)
 
 MAX_VISUALIZATIONS = 5
 MAX_RETRIES = 3
-CONCURRENT_ANALYSIS = True
-CONCURRENT_GENERATION = True
+CONCURRENT_ANALYSIS = False  # Sequential analysis to avoid rate limiting
+CONCURRENT_GENERATION = False  # Sequential generation to avoid GLM rate limiting
 ENABLE_SPATIAL_VALIDATION = True
 
 # Skip local render testing when rendering is offloaded to Modal
@@ -132,33 +132,72 @@ def _get_content_context(content: ContentInput) -> str:
 
 def _extract_voiceover_metadata(code: str) -> tuple[list[str], list[str]]:
     """Extract narration lines and beat labels from generated code."""
-    narrations = re.findall(
-        r'with\s+self\.voiceover\s*\(\s*text\s*=\s*"([^"]+)"\s*\)\s+as\s+tracker\s*:',
+    narrations = []
+    
+    # Pattern 1a: with self.voiceover(text="...") as tracker: (double quotes)
+    narrations.extend(re.findall(
+        r'with\s+self\.voiceover\s*\(\s*text\s*=\s*"([^"]*)"\s*\)\s+as\s+tracker\s*:',
         code,
-    )
+    ))
+    
+    # Pattern 1b: with self.voiceover(text='...') as tracker: (single quotes)
     if not narrations:
-        narrations = re.findall(
-            r'with\s+self\.voiceover\s*\(\s*"([^"]+)"\s*\)\s+as\s+tracker\s*:',
+        narrations.extend(re.findall(
+            r"with\s+self\.voiceover\s*\(\s*text\s*=\s*'([^']*)'\s*\)\s+as\s+tracker\s*:",
             code,
-        )
+        ))
+    
+    # Pattern 2a: with self.voiceover("...") as tracker: (positional, double quotes)
+    if not narrations:
+        narrations.extend(re.findall(
+            r'with\s+self\.voiceover\s*\(\s*"([^"]*)"\s*\)\s+as\s+tracker\s*:',
+            code,
+        ))
+    
+    # Pattern 2b: with self.voiceover('...') as tracker: (positional, single quotes)
+    if not narrations:
+        narrations.extend(re.findall(
+            r"with\s+self\.voiceover\s*\(\s*'([^']*)'\s*\)\s+as\s+tracker\s*:",
+            code,
+        ))
+    
+    # Pattern 3: with self.voiceover(..., text="...") - keyword argument style (double)
+    if not narrations:
+        narrations.extend(re.findall(
+            r'with\s+self\.voiceover\s*\([^)]*text\s*=\s*"([^"]*)"',
+            code,
+        ))
+    
+    # Pattern 4: with self.voiceover(..., text='...') - keyword argument style (single)
+    if not narrations:
+        narrations.extend(re.findall(
+            r"with\s+self\.voiceover\s*\([^)]*text\s*=\s*'([^']*)'",
+            code,
+        ))
+    
+    # Remove duplicates and clean
+    narrations = list(dict.fromkeys([n.strip() for n in narrations if n.strip()]))
 
+    # Extract beat labels
     beats = []
     for line in code.splitlines():
         stripped = line.strip()
         if re.match(r"#\s*Beat\s*\d+", stripped, re.IGNORECASE):
             beats.append(stripped)
 
-    return [n.strip() for n in narrations if n.strip()], beats
+    return narrations, beats
 
 
 # ═══════════════════════════════════════════════════════════
 # Main Entry Points
 # ═══════════════════════════════════════════════════════════
 
+from typing import Optional, Union, AsyncGenerator
+
 async def generate_universal_visualizations(
     content: StructuredContent,
     config: Optional[ProcessingConfig] = None,
-) -> list[Visualization]:
+) -> AsyncGenerator[Visualization, None]:
     """
     Generate visualizations from any content type with processing config.
     
@@ -190,33 +229,35 @@ async def generate_universal_visualizations(
         narration_style,
     )
     
-    return await _run_pipeline(
+    async for viz in _run_pipeline(
         content=content,
         max_visualizations=max_viz,
         duration_range=duration_range,
         tts_service=tts_service,
         voice_name=voice_name,
         narration_style=narration_style,
-    )
+    ):
+        yield viz
 
 
 async def generate_visualizations(
     paper: StructuredPaper,
     max_visualizations: int = MAX_VISUALIZATIONS,
-) -> list[Visualization]:
+) -> AsyncGenerator[Visualization, None]:
     """
     Generate validated visualizations from a structured paper.
     
     Legacy entry point — preserved for backward compatibility.
     """
-    return await _run_pipeline(
+    async for viz in _run_pipeline(
         content=paper,
         max_visualizations=max_visualizations,
         duration_range=VOICEOVER_TARGET_DURATION_SECONDS,
         tts_service=VOICEOVER_TTS_SERVICE,
         voice_name=VOICEOVER_VOICE_NAME,
         narration_style=VOICEOVER_NARRATION_STYLE,
-    )
+    ):
+        yield viz
 
 
 # ═══════════════════════════════════════════════════════════
@@ -230,7 +271,7 @@ async def _run_pipeline(
     tts_service: str = "gtts",
     voice_name: str = "",
     narration_style: str = "friendly_tutor",
-) -> list[Visualization]:
+) -> AsyncGenerator[Visualization, None]:
     """Internal pipeline runner that works with any content type."""
     content_title = _get_content_title(content)
     content_type = _get_content_type(content)
@@ -271,16 +312,14 @@ async def _run_pipeline(
     )
 
     logger.info("=" * 50)
-    logger.info("STEP 1: Analyzing sections for visualization candidates")
-    candidates = await _analyze_all_sections(analyzer, content)
+    logger.info("STEP 1: Analyzing sections for visualization candidates (BATCH)")
+    candidates = await _analyze_all_sections(analyzer, content, max_visualizations)
 
     if not candidates:
         logger.warning("No visualization candidates found in content")
-        return []
+        return
 
-    candidates.sort(key=lambda x: x.priority, reverse=True)
-    candidates = candidates[:max_visualizations]
-
+    # Candidates are already sorted and limited by _analyze_all_sections batch call
     logger.info("Found %s visualization candidates", len(candidates))
     for candidate in candidates:
         logger.debug("  - %s (priority: %s)", candidate.concept_name, candidate.priority)
@@ -288,64 +327,36 @@ async def _run_pipeline(
     logger.info("=" * 50)
     logger.info("STEP 2-7: Planning, generating, and quality validation")
 
-    if CONCURRENT_GENERATION:
-        tasks = [
-            generate_single_visualization(
-                candidate=candidate,
-                content=content,
-                planner=planner,
-                generator=generator,
-                validator=validator,
-                spatial_validator=spatial_validator,
-                voiceover_script_validator=voiceover_script_validator,
-                render_tester=render_tester,
-                legacy_voiceover_generator=legacy_voiceover_generator,
-                duration_range=duration_range,
-                tts_service=tts_service,
-                voice_name=voice_name,
-                narration_style=narration_style,
-            )
-            for candidate in candidates
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        visualizations: list[Visualization] = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error("Visualization generation failed: %s", result)
-            elif result is not None:
-                visualizations.append(result)
-    else:
-        visualizations = []
-        for candidate in candidates:
-            viz = await generate_single_visualization(
-                candidate=candidate,
-                content=content,
-                planner=planner,
-                generator=generator,
-                validator=validator,
-                spatial_validator=spatial_validator,
-                voiceover_script_validator=voiceover_script_validator,
-                render_tester=render_tester,
-                legacy_voiceover_generator=legacy_voiceover_generator,
-                duration_range=duration_range,
-                tts_service=tts_service,
-                voice_name=voice_name,
-                narration_style=narration_style,
-            )
-            if viz is not None:
-                visualizations.append(viz)
+    count = 0
+    for candidate in candidates:
+        viz = await generate_single_visualization(
+            candidate=candidate,
+            content=content,
+            planner=planner,
+            generator=generator,
+            validator=validator,
+            spatial_validator=spatial_validator,
+            voiceover_script_validator=voiceover_script_validator,
+            render_tester=render_tester,
+            legacy_voiceover_generator=legacy_voiceover_generator,
+            duration_range=duration_range,
+            tts_service=tts_service,
+            voice_name=voice_name,
+            narration_style=narration_style,
+        )
+        if viz is not None:
+            count += 1
+            yield viz
 
-    logger.info("Successfully generated %s visualizations", len(visualizations))
-    return visualizations
+    logger.info("Successfully generated %s visualizations", count)
 
 
 async def _analyze_all_sections(
     analyzer: SectionAnalyzer,
     content: ContentInput,
+    max_visualizations: int = MAX_VISUALIZATIONS,
 ) -> list[VisualizationCandidate]:
-    """Analyze all sections to find visualization candidates."""
-    candidates: list[VisualizationCandidate] = []
-    
+    """Analyze all sections in batch to find visualization candidates."""
     content_title = _get_content_title(content)
     content_description = _get_content_description(content)
     content_type = _get_content_type(content)
@@ -366,38 +377,21 @@ async def _analyze_all_sections(
         if section.title.lower() not in skip_titles and len(section.content) > 100
     ]
 
-    if CONCURRENT_ANALYSIS:
-        tasks = [
-            analyzer.run(
-                content_title=content_title,
-                content_description=content_description,
-                section=section,
-                content_type=content_type,
-            )
-            for section in sections_to_analyze
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+    if not sections_to_analyze:
+        return []
 
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error("Section analysis failed: %s", result)
-            elif result.needs_visualization:
-                candidates.extend(result.candidates)
-    else:
-        for section in sections_to_analyze:
-            try:
-                result = await analyzer.run(
-                    content_title=content_title,
-                    content_description=content_description,
-                    section=section,
-                    content_type=content_type,
-                )
-                if result.needs_visualization:
-                    candidates.extend(result.candidates)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to analyze section %s: %s", section.id, exc)
-
-    return candidates
+    try:
+        candidates = await analyzer.run_batch(
+            content_title=content_title,
+            content_description=content_description,
+            sections=sections_to_analyze,
+            content_type=content_type,
+            max_candidates=max_visualizations,
+        )
+        return candidates
+    except Exception as exc:
+        logger.error("Failed batch section analysis: %s", exc)
+        return []
 
 
 async def generate_single_visualization(
@@ -410,7 +404,7 @@ async def generate_single_visualization(
     voiceover_script_validator: Optional[VoiceoverScriptValidator] = None,
     render_tester: Optional[RenderTester] = None,
     legacy_voiceover_generator: Optional[VoiceoverGenerator] = None,
-    duration_range: tuple[int, int] = (30, 45),
+    duration_range: tuple[int, int] = (45, 90),
     tts_service: str = "gtts",
     voice_name: str = "",
     narration_style: str = "friendly_tutor",
@@ -504,61 +498,73 @@ async def generate_single_visualization(
             # Stage 2: spatial validation
             if spatial_validator:
                 logger.info("    [2/4] SpatialValidator: Checking positioning...")
-                spatial_result = spatial_validator.validate(current_code)
-                if spatial_result.needs_regeneration:
-                    logger.warning(
-                        "    [2/4] FAILED: bounds=%s overlaps=%s - regenerating",
-                        len(spatial_result.out_of_bounds),
-                        len(spatial_result.potential_overlaps),
-                    )
-                    continue
-                logger.info("    [2/4] PASSED")
+                try:
+                    spatial_result = spatial_validator.validate(current_code)
+                    if spatial_result.needs_regeneration:
+                        logger.warning(
+                            "    [2/4] FAILED: bounds=%s overlaps=%s - regenerating",
+                            len(spatial_result.out_of_bounds),
+                            len(spatial_result.potential_overlaps),
+                        )
+                        continue
+                    logger.info("    [2/4] PASSED")
+                except Exception as spatial_error:
+                    logger.error("    [2/4] SPATIAL VALIDATOR ERROR: %s", spatial_error, exc_info=True)
+                    logger.warning("    [2/4] Skipping spatial validation due to error, continuing...")
             else:
                 logger.info("    [2/4] SpatialValidator: Skipped")
 
             # Stage 3: strict voiceover quality validation (unified mode)
             if voiceover_enabled_for_generation and voiceover_script_validator:
                 logger.info("    [3/4] VoiceoverScriptValidator: Checking narration quality...")
-                narrations, beats = _extract_voiceover_metadata(current_code)
-                code_result.code = current_code
-                code_result.narration_lines = narrations
-                code_result.narration_beats = beats
-                code_result.voiceover_enabled = True
+                try:
+                    narrations, beats = _extract_voiceover_metadata(current_code)
+                    code_result.code = current_code
+                    code_result.narration_lines = narrations
+                    code_result.narration_beats = beats
+                    code_result.voiceover_enabled = True
 
-                voice_result = voiceover_script_validator.validate(
-                    generated_code=code_result,
-                    plan=plan,
-                    candidate=candidate,
-                )
+                    voice_result = await voiceover_script_validator.validate(
+                        generated_code=code_result,
+                        plan=plan,
+                        candidate=candidate,
+                    )
 
-                if voice_result.needs_regeneration:
-                    logger.warning(
-                        "    [3/4] FAILED: alignment=%.2f educational=%.2f",
+                    if voice_result.needs_regeneration:
+                        logger.warning(
+                            "    [3/4] FAILED: alignment=%.2f educational=%.2f",
+                            voice_result.score_alignment,
+                            voice_result.score_educational,
+                        )
+                        continue
+
+                    logger.info(
+                        "    [3/4] PASSED: alignment=%.2f educational=%.2f",
                         voice_result.score_alignment,
                         voice_result.score_educational,
                     )
-                    continue
-
-                logger.info(
-                    "    [3/4] PASSED: alignment=%.2f educational=%.2f",
-                    voice_result.score_alignment,
-                    voice_result.score_educational,
-                )
+                except Exception as voice_error:
+                    logger.error("    [3/4] VOICEOVER VALIDATOR ERROR: %s", voice_error, exc_info=True)
+                    logger.warning("    [3/4] Skipping voiceover validation due to error, continuing...")
             else:
                 logger.info("    [3/4] VoiceoverScriptValidator: Skipped")
 
             # Stage 4: render test
             if render_tester:
                 logger.info("    [4/4] RenderTester: Testing import & execution...")
-                render_result = await render_tester.test_render(current_code)
-                if not render_result.success:
-                    logger.warning(
-                        "    [4/4] FAILED: %s - %s",
-                        render_result.error_type,
-                        (render_result.error_message or "")[:120],
-                    )
-                    continue
-                logger.info("    [4/4] PASSED")
+                try:
+                    render_result = await render_tester.test_render(current_code)
+                    if not render_result.success:
+                        logger.warning(
+                            "    [4/4] FAILED: %s - %s",
+                            render_result.error_type,
+                            (render_result.error_message or "")[:120],
+                        )
+                        continue
+                    logger.info("    [4/4] PASSED")
+                except Exception as render_error:
+                    logger.error("    [4/4] RENDER TESTER ERROR: %s", render_error, exc_info=True)
+                    logger.warning("    [4/4] Skipping render test due to error, continuing...")
             else:
                 logger.info("    [4/4] RenderTester: Skipped")
 
@@ -603,7 +609,8 @@ async def generate_single_visualization(
         )
 
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to generate visualization %s: %s", viz_id, exc)
+        logger.error("Failed to generate visualization %s: %s", viz_id, exc, exc_info=True)
+        logger.error("Full traceback for failed visualization:", exc_info=True)
         return None
 
 

@@ -117,7 +117,7 @@ async def start_universal_processing(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     
-    # Determine content_id
+    # Determination of content_id
     if request.arxiv_id:
         content_id = request.arxiv_id
     elif request.url:
@@ -141,6 +141,23 @@ async def start_universal_processing(
     else:
         import hashlib
         content_id = f"content:{hashlib.sha256(request.text[:200].encode()).hexdigest()[:12]}"
+    
+    # Verify Solana Payment
+    # For hackathon/MVP: If payment_signature is provided, verify it.
+    # In production, this would be mandatory for all non-free requests.
+    if request.payment_signature:
+        from solana.verify import verify_solana_payment
+        is_valid = await verify_solana_payment(request.payment_signature)
+        if not is_valid:
+            raise HTTPException(
+                status_code=402,
+                detail="Payment required or transaction verification failed"
+            )
+    elif detected_type == "technical_content" and os.getenv("PAYMENT_REQUIRED", "false").lower() == "true":
+         raise HTTPException(
+            status_code=402,
+            detail="Payment required for strategy visualization. Please connect wallet."
+        )
     
     # Create job with processing config
     job_id = await queries.create_job(

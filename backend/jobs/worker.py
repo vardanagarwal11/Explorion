@@ -8,7 +8,13 @@ Supports legacy paper-only mode and universal content processing.
 import asyncio
 import logging
 import uuid
+import os
+from pathlib import Path
 from datetime import datetime
+
+# Ensure backend/bin is in PATH for sox and ffmpeg to be found globally
+_bin_path = Path(__file__).parent.parent / "bin"
+os.environ["PATH"] = str(_bin_path) + os.pathsep + os.environ.get("PATH", "")
 from db.connection import async_session_maker
 from db import queries
 from db.models import Section
@@ -148,12 +154,11 @@ async def process_paper_job(job_id: str, arxiv_id: str):
             logger.info("Converted database sections to StructuredPaper format")
 
             logger.info("Invoking visualization generation pipeline...")
-            generated_visualizations = await generate_visualizations(structured_paper)
-            logger.info(f"Generated {len(generated_visualizations)} visualization(s)")
-
-            # Render
-            await _store_and_render_visualizations(
-                db, job_id, arxiv_id, generated_visualizations
+            viz_generator = generate_visualizations(structured_paper)
+            
+            # Render as they are generated
+            await _process_visualizations_stream(
+                db, job_id, arxiv_id, viz_generator
             )
 
         except Exception as e:
@@ -264,16 +269,15 @@ async def process_universal_job(
             )
             logger.info("Converted database records to StructuredContent format")
 
-            # Generate using universal pipeline
+            # Generate and stream using universal pipeline
             logger.info("Invoking universal visualization pipeline...")
-            generated_visualizations = await generate_universal_visualizations(
+            viz_generator = generate_universal_visualizations(
                 structured_content, config
             )
-            logger.info(f"Generated {len(generated_visualizations)} visualization(s)")
-
-            # Step 3: Store, render, and optionally generate TTS
-            await _store_and_render_visualizations(
-                db, job_id, content_id, generated_visualizations
+            
+            # Step 3: Store and render on the fly
+            await _process_visualizations_stream(
+                db, job_id, content_id, viz_generator
             )
 
             # Step 4: Generate TTS audio and subtitles (if narration was generated)
@@ -301,71 +305,22 @@ async def process_universal_job(
 # Shared Rendering Pipeline
 # ═══════════════════════════════════════════════════════════
 
-async def _store_and_render_visualizations(db, job_id, content_id, generated_visualizations):
-    """Store visualization records and render them. Shared by both legacy and universal pipelines."""
-    # Create visualization records
-    logger.info("Creating visualization records in database...")
+async def _process_visualizations_stream(db, job_id, content_id, viz_generator):
+    """Store visualization records and render them iteratively as they stream from the generator."""
+    logger.info("=" * 60)
+    logger.info(f"PIPELINED GENERATION & RENDERING FOR {content_id}")
+    logger.info("=" * 60)
+    
+    render_semaphore = asyncio.Semaphore(3)
+    progress_lock = asyncio.Lock()
+    completed_renders = 0
     viz_records = []
+    render_tasks = []
 
     content_suffix = content_id.replace(".", "").replace("/", "")[:8]
 
-    for i, visualization in enumerate(generated_visualizations):
-        viz_id = f"viz_{content_suffix}_{i+1}"
-        logger.info(f"  [{i+1}/{len(generated_visualizations)}] Creating record for {viz_id}")
-        logger.debug(f"    Concept: {visualization.concept}")
-        logger.debug(f"    Section: {visualization.section_id}")
-
-        await queries.upsert_visualization(
-            db,
-            viz_id=viz_id,
-            paper_id=content_id,
-            section_id=visualization.section_id,
-            concept=visualization.concept,
-            storyboard={"raw": visualization.storyboard},
-            manim_code=visualization.manim_code,
-            status="pending",
-        )
-        viz_records.append({
-            "id": viz_id,
-            "manim_code": visualization.manim_code,
-        })
-
-    if not viz_records:
-        logger.warning("No valid visualizations were generated")
-        await queries.update_job_status(
-            db, job_id,
-            status="completed",
-            current_step="No valid visualizations generated",
-            progress=1.0
-        )
-        return
-
-    # Render visualizations
-    logger.info("=" * 60)
-    logger.info(f"RENDERING {len(viz_records)} visualizations")
-    logger.info("=" * 60)
-
-    await queries.update_job_status(
-        db, job_id,
-        current_step="Generating animations",
-        progress=0.70,
-        sections_total=len(viz_records),
-        sections_completed=0
-    )
-
-    await queries.update_job_status(
-        db, job_id,
-        current_step="Rendering videos",
-        progress=0.75
-    )
-
-    render_semaphore = asyncio.Semaphore(3)
-    progress_lock = asyncio.Lock()
-    progress_bar = ProgressBar(len(viz_records), "Video Rendering")
-    completed_count = 0
-
-    async def _render_one(viz: dict, index: int):
-        nonlocal completed_count
+    async def _render_one(viz: dict):
+        nonlocal completed_renders
         async with render_semaphore:
             try:
                 logger.info(f"Starting render: {viz['id']}")
@@ -380,17 +335,6 @@ async def _store_and_render_visualizations(db, job_id, content_id, generated_vis
                     status="complete",
                     video_url=video_url
                 )
-                progress_bar.update()
-
-                # Update job progress incrementally (75% to 95%)
-                async with progress_lock:
-                    completed_count += 1
-                    render_progress = 0.75 + (0.20 * (completed_count / len(viz_records)))
-                    await queries.update_job_status(
-                        db, job_id,
-                        progress=render_progress,
-                        sections_completed=completed_count
-                    )
             except Exception as e:
                 logger.error(f"✗ Failed to render {viz['id']}: {str(e)}")
                 await queries.update_visualization_status(
@@ -398,24 +342,67 @@ async def _store_and_render_visualizations(db, job_id, content_id, generated_vis
                     status="failed",
                     error=str(e)
                 )
-                progress_bar.update()
 
-                # Still update progress even on failure
-                async with progress_lock:
-                    completed_count += 1
-                    render_progress = 0.75 + (0.20 * (completed_count / len(viz_records)))
-                    await queries.update_job_status(
-                        db, job_id,
-                        progress=render_progress,
-                        sections_completed=completed_count
-                    )
+            async with progress_lock:
+                completed_renders += 1
+                # Incrementally update progress
+                render_progress = 0.70 + (0.25 * min(completed_renders / 5.0, 1.0))
+                await queries.update_job_status(
+                    db, job_id,
+                    progress=render_progress,
+                    sections_completed=completed_renders
+                )
 
-    logger.info(f"Rendering {len(viz_records)} videos concurrently (max 3 parallel)...")
-    await asyncio.gather(*[
-        _render_one(viz, i) for i, viz in enumerate(viz_records)
-    ])
+    await queries.update_job_status(
+        db, job_id,
+        current_step="Generating and rendering animations concurrently",
+        progress=0.70,
+        sections_total=5, # Approximate max
+        sections_completed=0
+    )
 
-    logger.info("All videos rendered!")
+    i = 0
+    async for visualization in viz_generator:
+        i += 1
+        viz_id = f"viz_{content_suffix}_{i}"
+        logger.info(f"  [{i}] Saving generated visualization {viz_id} to database...")
+        logger.debug(f"    Concept: {visualization.concept}")
+        
+        await queries.upsert_visualization(
+            db,
+            viz_id=viz_id,
+            paper_id=content_id,
+            section_id=visualization.section_id,
+            concept=visualization.concept,
+            storyboard={"raw": visualization.storyboard},
+            manim_code=visualization.manim_code,
+            status="pending",
+        )
+        
+        viz_record = {
+            "id": viz_id,
+            "manim_code": visualization.manim_code,
+        }
+        viz_records.append(viz_record)
+        
+        # Spawn render task immediately without awaiting it
+        logger.info(f"  -> Kicking off render task for {viz_id} in background")
+        task = asyncio.create_task(_render_one(viz_record))
+        render_tasks.append(task)
+
+    if not viz_records:
+        logger.warning("No valid visualizations were generated")
+        await queries.update_job_status(
+            db, job_id,
+            status="completed",
+            current_step="No valid visualizations generated",
+            progress=1.0
+        )
+        return []
+
+    logger.info("All code generation finished. Waiting for any remaining renders to complete...")
+    if render_tasks:
+        await asyncio.gather(*render_tasks)
 
     # Brief pause to ensure all DB commits have settled
     await asyncio.sleep(0.5)
@@ -433,6 +420,8 @@ async def _store_and_render_visualizations(db, job_id, content_id, generated_vis
     logger.info(f"✓ Content: {content_id}")
     logger.info(f"✓ Visualizations rendered: {len(viz_records)}")
     logger.info("=" * 60)
+    
+    return viz_records
 
 
 # ═══════════════════════════════════════════════════════════
@@ -448,12 +437,22 @@ async def _generate_tts_for_visualizations(db, content_id: str, config: Processi
     - SRT/VTT subtitle files
     """
     import re
-    from tts import get_tts_engine, get_narration_style, estimate_narration_timing, generate_srt, generate_vtt
+    
+    try:
+        from tts import get_tts_engine, get_narration_style, estimate_narration_timing, generate_srt, generate_vtt
+    except ImportError as e:
+        logger.error(f"Failed to import TTS module: {e}")
+        logger.warning("Skipping TTS generation due to import error")
+        return
     
     logger.info("Generating TTS audio and subtitles...")
     
-    engine = get_tts_engine(config.tts_provider.value)
-    style = get_narration_style(config.narration_style.value)
+    try:
+        engine = get_tts_engine(config.tts_provider.value)
+        style = get_narration_style(config.narration_style.value)
+    except Exception as e:
+        logger.error(f"Failed to initialize TTS engine: {e}", exc_info=True)
+        return
     
     # Get all visualizations for this content
     db_paper = await queries.get_paper(db, content_id)

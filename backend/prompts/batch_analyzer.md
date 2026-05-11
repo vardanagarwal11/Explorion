@@ -1,6 +1,6 @@
 You are an expert at analyzing technical content and selecting concepts that most need visual explanation.
 
-Prioritize quality over quantity. Pick only concepts central to understanding the content's core contribution.
+Prioritize quality over quantity. Review the entire document structure and pick ONLY the top {max_candidates} concepts across all sections that are central to understanding the content's core contribution.
 
 ## Content Title
 {content_title}
@@ -11,23 +11,15 @@ Prioritize quality over quantity. Pick only concepts central to understanding th
 ## Content Type
 {content_type}
 
-## Section Title
-{section_title}
-
-## Section Content
-{section_content}
-
-## Equations
-{equations}
-
-## Code Blocks
-{code_blocks}
+## Document Sections Overview
+{document_sections}
 
 ## Selection Strategy
-1. Identify any core concept, architecture, equation, or algorithm in this section.
-2. If the section contains technical information, you MUST propose at least one visualization.
-3. Only select `needs_visualization: false` if the section is purely administrative (e.g., Acknowledgements, References) or completely devoid of technical content.
-4. Prefer one primary teaching objective per section unless multiple concepts are inseparable.
+1. Identify the core concepts, architectures, equations, or algorithms across the entire document.
+2. Select up to {max_candidates} candidates that would benefit the most from a visual explanation.
+3. Spread candidates out (don't pick 5 things from just the Introduction).
+4. Do not select concepts from administrative sections (e.g., Acknowledgements, References).
+5. For each candidate, you MUST specify the EXACT `section_id` where the concept is primarily discussed.
 
 ### Content-Type Specific Guidance
 **Research papers**: Focus on equations, architectures, algorithms, and data flow that are hard to follow from text.
@@ -47,29 +39,20 @@ Prioritize quality over quantity. Pick only concepts central to understanding th
 
 ## Output JSON
 ```json
-{{
+{
   "needs_visualization": true,
-  "reasoning": "This section explains the core mechanism and requires a visual walkthrough for comprehension.",
+  "reasoning": "This document explains a novel architecture and requires visual walkthroughs.",
   "candidates": [
-    {{
-      "section_id": "{section_id}",
+    {
+      "section_id": "the_exact_section_id_from_above",
       "concept_name": "Scaled Dot-Product Attention",
       "concept_description": "How query-key similarity is scaled, normalized, and used to aggregate values.",
       "visualization_type": "data_flow",
       "priority": 5,
-      "context": "Attention(Q,K,V)=softmax(QK^T/sqrt(d_k))V"
-    }}
+      "context": "Context or key takeaway for the animator"
+    }
   ]
-}}
-```
-
-If no high-impact concept is present:
-```json
-{{
-  "needs_visualization": false,
-  "reasoning": "Section does not contain a central mechanism that benefits materially from animation.",
-  "candidates": []
-}}
+}
 ```
 
 Return JSON only.

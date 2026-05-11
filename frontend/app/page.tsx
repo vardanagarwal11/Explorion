@@ -200,7 +200,7 @@ export default function Home() {
             {/* Description */}
             <div className="relative">
               <p className="text-xs lg:text-sm text-gray-300 mb-2 leading-relaxed font-mono opacity-80 max-w-md">
-                Generate long-form animated explanation videos. Paste an arXiv paper, GitHub repo, or technical blog to visualize architectures, math, and concepts.
+                Explorion transforms complex technical strategies, research papers, and codebases into interactive cinematic explainers.
               </p>
 
               {/* Universal Input Form */}
