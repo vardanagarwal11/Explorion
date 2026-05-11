@@ -1,0 +1,30 @@
+
+--- Introduction & Motivation ---
+## Introduction to Grover's Search Algorithm
+The **Grover search algorithm** is a quantum algorithm that finds an element in an unsorted database of $N$ entries in $O(\sqrt{N})$ time, which is a significant improvement over the classical $O(N)$ time. This algorithm relies on two key principles of quantum computing: **superposition** and **interference**. Superposition allows a quantum computer to evaluate multiple possibilities simultaneously, while interference amplifies the probability of the correct solution and diminishes the probabilities of incorrect ones.
+
+## The Proposed Approach
+The proposed approach modifies the Grover search algorithm by incorporating a rotation phase angle determined mathematically from the derivative of the model during the initial iteration. At each iteration, a new phase angle is computed and used in a rotation gate around the $y+z$ axis in the diffusion operator. The computed phase angles are optimized through an adaptive adjustment based on the estimated increasing ratio of the consecutive amplitudes.
+
+--- Approach & Methodology ---
+## Key Equations and Concepts
+The algorithm starts with the creation of a superposition of all possible states representing the search space, which can be expressed as $\sqrt{\frac{1}{N}} \sum_{x=0}^{N-1} |x\rangle$. The Grover diffusion operator is applied iteratively to amplify the probability of the target state. The optimal phase angle $\theta$ is determined by solving the equation:
+$$\frac{d}{d\theta} \left( \sin^2 \left( \frac{\theta}{2} \right) \right) = 0$$
+This leads to the general formula for the phase angle:
+$$\theta = 2 \tan^{-1} \left( \frac{1}{2^{n-1}} \right)$$
+where $n$ is the number of qubits.
+
+--- Key Concepts ---
+## Simulation Results
+The proposed approach is simulated using MATLAB and IBM's Quirk programs for scenarios with up to 12 qubits, resulting in 4096 combinations of search entries. The results show an average decrease of 28% in the required number of iterations compared to the standard Grover search algorithm. For large-scale search spaces, this improvement rises to 29.58%. The probability of success is also increased, with an average reduction of 28.1017% in the number of iterations.
+
+--- Results & Findings ---
+## Conclusion
+The proposed modification to the Grover search algorithm achieves a significant improvement in the number of iterations required to find the target state. The approach can be implemented with fewer gates than the standard algorithm, making it a more efficient solution for large-scale search problems. The research demonstrates the potential of quantum computing to solve complex problems more efficiently than classical algorithms.
+
+--- Discussion & Implications ---
+Some key results from the simulations are:
+* For $n=5$ qubits, the proposed method achieves a 25% reduction in the number of iterations compared to the standard algorithm.
+* For $n=13$ qubits, the proposed method achieves a 29.58% improvement in the number of iterations.
+* The probability of success is increased, with an average reduction of 28.1017% in the number of iterations.
+* The proposed approach can be implemented with fewer gates than the standard algorithm, making it a more efficient solution for large-scale search problems.
